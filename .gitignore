@@ -7,3 +7,6 @@ data/index/*
 !data/index/.gitkeep
 *.log
 .DS_Store
+
+search_engine_rust/target
+
