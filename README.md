@@ -23,25 +23,25 @@ Query ? Cache ? Retrieval ? Multi-Signal Ranking ? Answer Extraction ? Output
 ```
 search-engine
 +-- data/
-¦   +-- raw/
-¦   +-- processed/
-¦   +-- index/
+Â¦   +-- raw/
+Â¦   +-- processed/
+Â¦   +-- index/
 +-- src/
-¦   +-- api/
-¦   +-- cache/
-¦   +-- confidence/
-¦   +-- crawler/
-¦   +-- extraction/
-¦   +-- feedback/
-¦   +-- indexing/
-¦   +-- ingestion/
-¦   +-- performance/
-¦   +-- processing/
-¦   +-- query/
-¦   +-- ranking/
-¦   +-- retrieval/
-¦   +-- update/
-¦   +-- utils/
+Â¦   +-- api/
+Â¦   +-- cache/
+Â¦   +-- confidence/
+Â¦   +-- crawler/
+Â¦   +-- extraction/
+Â¦   +-- feedback/
+Â¦   +-- indexing/
+Â¦   +-- ingestion/
+Â¦   +-- performance/
+Â¦   +-- processing/
+Â¦   +-- query/
+Â¦   +-- ranking/
+Â¦   +-- retrieval/
+Â¦   +-- update/
+Â¦   +-- utils/
 +-- config.js
 +-- server.js
 ```
@@ -142,7 +142,7 @@ Retries previously failed URLs (offline-first sync).
 
 ### Processing
 - Cleans and chunks documents
-- Default chunk size: 100–200 words
+- Default chunk size: 100â€“200 words
 
 ### Indexing
 - **BM25** inverted index
@@ -218,6 +218,4 @@ Then restart the server.
 - No external dependencies required
 - Designed to be extended (storage engines, ANN indexes, etc.)
 
----
 
-If you want telemetry endpoints, batch updating, or ANN acceleration, open an issue or extend `src/performance/`.
