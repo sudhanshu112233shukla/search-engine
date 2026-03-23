@@ -1,221 +1,166 @@
-# Search Engine Core (Hybrid Retrieval + Extraction)
+# Offline Hybrid Search Engine (Rust Core + Android App)
 
-A local, offline-first hybrid search engine core that supports keyword and semantic retrieval, advanced ranking, exact answer extraction, incremental updates, and performance optimizations. This is **not** a chatbot; it returns **extracted answers** with sources and confidence.
+A production-grade, **offline-first search engine** with a Rust core and a modern Android app. It combines **BM25 keyword search**, **semantic similarity**, multi-signal ranking, exact answer extraction, and evaluation tooling�all built to run **entirely on device** without a server.
 
-## What This Builds
+---
 
-- **Hybrid retrieval**: BM25 + vector embeddings
-- **Advanced ranking**: BM25, semantic, exact match, phrase match, freshness, feedback
-- **Exact answer extraction**: sentence selection + shortest span
-- **Incremental indexing**: append new docs without full rebuild
-- **Mini crawler**: fetch + clean web pages
-- **Offline-first updates**: queue failed URLs, sync later
-- **Performance**: query cache + vector quantization + optimized load
+## 1. Project Overview
 
-## Architecture (Pipeline)
+This project delivers a real mobile search experience:
+
+- **On-device hybrid search** (BM25 + semantic similarity)
+- **Multi-signal ranking** (exact match, phrase match, proximity)
+- **Answer extraction** with confidence scoring
+- **Offline-first Android app** using Jetpack Compose
+- **Evaluation framework** (precision, recall, MRR)
+
+Why it matters:
+- Works without internet
+- Fast, private, and reliable
+- Ideal for mobile knowledge bases and offline docs
+
+---
+
+## 2. Features
+
+- Hybrid retrieval (BM25 + semantic)
+- Multi-signal ranking (bm25, semantic, exact, phrase, proximity)
+- Answer extraction (top answers)
+- Snippet generation + highlighting
+- Query cache
+- Offline dataset loading
+- Jetpack Compose UI + MVVM
+- Evaluation CLI (precision@10, recall@10, MRR)
+
+---
+
+## 3. Architecture
 
 ```
-Query ? Cache ? Retrieval ? Multi-Signal Ranking ? Answer Extraction ? Output
+User
+  ?
+Android App (Compose UI)
+  ?
+Rust FFI (JNI)
+  ?
+Search Engine Core
+  +- BM25
+  +- Vector Similarity
+  +- Multi-Signal Ranking
+  +- Answer Extraction
+  +- Snippet Generation
+  ?
+Results + Answers
 ```
 
-## Project Structure
+---
+
+## 4. Repo Structure
 
 ```
-search-engine
-+-- data/
-¦   +-- raw/
-¦   +-- processed/
-¦   +-- index/
-+-- src/
-¦   +-- api/
-¦   +-- cache/
-¦   +-- confidence/
-¦   +-- crawler/
-¦   +-- extraction/
-¦   +-- feedback/
-¦   +-- indexing/
-¦   +-- ingestion/
-¦   +-- performance/
-¦   +-- processing/
-¦   +-- query/
-¦   +-- ranking/
-¦   +-- retrieval/
-¦   +-- update/
-¦   +-- utils/
-+-- config.js
-+-- server.js
+search-engine/
++-- android_app/        # Android app (Compose + MVVM)
++-- search_engine_rust/ # Rust search core + FFI
++-- evaluation/         # Evaluation queries
++-- docs/               # Documentation + assets
++-- README.md
 ```
 
-## Quick Start
+---
 
-1. Put `.txt`, `.json`, or `.jsonl` docs in `data/raw/`
-2. Start the server:
+## 5. Demo Screenshots
+
+Add screenshots here:
+
+```
+docs/screenshots/home.png
+docs/screenshots/results.png
+docs/screenshots/detail.png
+```
+
+(Placeholders included; add real images for portfolio.)
+
+---
+
+## 6. How To Run
+
+### 6.1 Build Rust Core
+
+From `search_engine_rust/`:
 
 ```bash
-node server.js
+cargo build --release
 ```
 
-3. Query:
+### 6.2 Build Android Native Libraries
 
 ```bash
-curl -X POST http://localhost:3000/search \
-  -H "Content-Type: application/json" \
-  -d "{\"query\":\"your search\"}"
+rustup target add aarch64-linux-android armv7-linux-androideabi
+
+cargo build --release --target aarch64-linux-android
+cargo build --release --target armv7-linux-androideabi
 ```
 
-## API
-
-### `POST /search`
-Returns a **precise extracted answer** with source and confidence.
-
-Request:
-```json
-{ "query": "what is bm25" }
+Copy:
+```
+search_engine_rust/target/aarch64-linux-android/release/libsearch_engine_rust.so
+search_engine_rust/target/armv7-linux-androideabi/release/libsearch_engine_rust.so
 ```
 
-Response:
-```json
-{
-  "query": "what is bm25",
-  "queryType": "factual",
-  "answer": "...exact extracted span...",
-  "source": {
-    "id": "doc::chunk2",
-    "sourceId": "doc.txt",
-    "chunkIndex": 2,
-    "totalChunks": 5,
-    "meta": {}
-  },
-  "confidence": 2.14
-}
+To:
+```
+android_app/app/src/main/jniLibs/arm64-v8a/
+android_app/app/src/main/jniLibs/armeabi-v7a/
 ```
 
-### `POST /feedback`
-Tracks clicks and boosts future results.
+### 6.3 Run Android App
 
-```json
-{ "query": "bm25", "docId": "doc::chunk2" }
+Open `android_app/` in Android Studio and run.
+
+---
+
+## 7. Evaluation (Quality Metrics)
+
+Run evaluation CLI:
+
+```bash
+cd search_engine_rust
+cargo run -- eval ../evaluation/queries.json
 ```
 
-### `POST /update`
-Incremental update without full reindex. Supports:
-- `paths`: external folders/files (txt/json/jsonl)
-- `wikipediaPath`: Wikipedia JSONL file
-- `urls`: list of web pages to crawl
-- `documents`: ad-hoc docs with `{id, text, meta}`
+Metrics include:
+- Precision@10
+- Recall@10
+- MRR
+- Answer Accuracy
+- Latency (avg + max)
 
-```json
-{
-  "paths": ["C:\\data\\docs"],
-  "wikipediaPath": "C:\\data\\wiki.jsonl",
-  "urls": ["https://example.com/page"],
-  "documents": [{ "id": "doc-1", "text": "content", "meta": {} }]
-}
-```
+---
 
-Response:
-```json
-{
-  "status": "ok",
-  "summary": {
-    "addedDocs": 10,
-    "addedChunks": 47,
-    "bm25Added": 47,
-    "vectorAdded": 47,
-    "queuedUrls": 2
-  }
-}
-```
+## 8. Demo Queries
 
-### `POST /sync`
-Retries previously failed URLs (offline-first sync).
+See `docs/demo_queries.md` for sample queries + expected behavior.
 
-```json
-{}
-```
+---
 
-## Core Components
+## 9. Performance Notes
 
-### Ingestion
-- Supports `.txt`, `.json`, `.jsonl`
-- JSON supports objects/arrays with fields: `text`, `content`, `body`
+- Designed for **<200ms** search on mobile-sized datasets
+- Fully offline; no network calls
+- Memory scales with dataset size
+- Query cache reduces repeated computation
 
-### Processing
-- Cleans and chunks documents
-- Default chunk size: 100–200 words
+---
 
-### Indexing
-- **BM25** inverted index
-- **Vector** index with quantized embeddings (int8)
+## 10. Future Work
 
-### Retrieval
-- Top-K from BM25 + vector
-- Multi-signal ranking
+- Larger datasets (50K+ docs)
+- Personalization + feedback signals
+- Better embeddings (small on-device models)
+- Optional ANN acceleration
 
-### Answer Extraction
-- Sentence selection + shortest span extraction
-- No generation, extraction-only
+---
 
-### Feedback
-- Click tracking boosts results
-- Query-aware + global signals
+## License
 
-### Crawler
-- Fetches page HTML and strips scripts/styles/tags
-- Stores cleaned text
-
-### Performance
-- Query caching (LRU + TTL)
-- Vector quantization for memory + speed
-- Hydrated vector arrays for fast dot products
-
-## Ranking Signals
-Final score is weighted sum of:
-- BM25
-- Semantic similarity
-- Exact match
-- Phrase match
-- Freshness
-- Feedback
-
-Weights are configurable in `config.js`, with profiles for:
-- `factual`
-- `list`
-- `comparison`
-
-## Config Highlights (`config.js`)
-- `chunking`: chunk size
-- `bm25`: BM25 params
-- `vector`: embedding + quantization options
-- `ranking`: signal weights + profiles
-- `cache`: TTL + size
-- `update`: pending URL queue path
-
-## Data Formats
-
-### Wikipedia JSONL
-One JSON object per line. Fields supported:
-- `title`, `text`, `id`
-
-Example line:
-```json
-{"id":"123","title":"BM25","text":"BM25 is a ranking function..."}
-```
-
-## Offline-First Behavior
-- Failed URL fetches are queued in `data/index/pending_urls.json`
-- `POST /sync` retries and updates indexes
-
-## Rebuild Notes
-To force a full rebuild, delete:
-- `data/index/`
-- `data/processed/`
-
-Then restart the server.
-
-## Notes
-- Runs fully offline (crawler optional)
-- No external dependencies required
-- Designed to be extended (storage engines, ANN indexes, etc.)
-
-
+MIT (add your license file if needed)

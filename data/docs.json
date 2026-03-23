@@ -1,0 +1,50 @@
+[
+  {
+    "id": "doc-1",
+    "text": "BM25 is a ranking function used by search engines. It improves on TF-IDF by normalizing for document length. Many modern systems still rely on BM25 for keyword relevance."
+  },
+  {
+    "id": "doc-2",
+    "text": "Vector search compares embeddings to capture semantic similarity. It can retrieve documents even when keywords do not match exactly. Hybrid search blends vector and keyword signals."
+  },
+  {
+    "id": "doc-3",
+    "text": "Hybrid ranking combines multiple signals such as BM25, semantic similarity, freshness, and click feedback. The goal is to balance precision and recall for user queries."
+  },
+  {
+    "id": "doc-4",
+    "text": "Answer extraction selects the most relevant sentence from a passage. It avoids hallucination by returning text that actually appears in the source document."
+  },
+  {
+    "id": "doc-5",
+    "text": "An inverted index maps terms to documents. It enables fast keyword search by storing postings lists for each term."
+  },
+  {
+    "id": "doc-6",
+    "text": "Cosine similarity measures the angle between vectors. It is commonly used in information retrieval to compare query and document vectors."
+  },
+  {
+    "id": "doc-7",
+    "text": "Stopword removal reduces noise by ignoring common words like 'the' and 'and'. This can improve keyword scoring efficiency."
+  },
+  {
+    "id": "doc-8",
+    "text": "Chunking splits long documents into smaller passages. This improves matching granularity and helps answer extraction."
+  },
+  {
+    "id": "doc-9",
+    "text": "Freshness is a ranking signal that boosts recently updated documents. It is useful for news and time-sensitive searches."
+  },
+  {
+    "id": "doc-10",
+    "text": "Query understanding can classify intent, such as factual, list, or comparison queries. Different intents may benefit from different ranking weights."
+  },
+  {
+    "id": "doc-11",
+    "text": "Exact match and phrase match signals reward documents that contain the user's query terms in order. These signals often improve precision."
+  },
+  {
+    "id": "doc-12",
+    "text": "Offline-first search engines store data on device and synchronize updates when online. This enables fast, reliable search without network dependency."
+  }
+]

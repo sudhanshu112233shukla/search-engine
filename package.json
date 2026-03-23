@@ -1,0 +1,14 @@
+{
+  "name": "search-engine-demo",
+  "version": "1.0.0",
+  "description": "Minimal hybrid search engine demo (BM25 + similarity + extraction)",
+  "main": "demo.js",
+  "type": "commonjs",
+  "scripts": {
+    "demo": "node demo.js",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

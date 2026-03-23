@@ -7,6 +7,9 @@ data/index/*
 !data/index/.gitkeep
 *.log
 .DS_Store
-
-search_engine_rust/target
-
+android_app/.gradle/
+android_app/**/build/
+android_app/**/local.properties
+android_app/**/.idea/
+android_app/**/*.iml
+search_engine_rust/target/

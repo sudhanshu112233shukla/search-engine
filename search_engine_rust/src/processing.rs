@@ -1,11 +1,15 @@
+use std::collections::HashMap;
+
 use crate::ingestion::Document;
-use crate::utils::normalize_text;
+use crate::utils::{normalize_text, tokenize_with_positions};
 
 #[derive(Clone, Debug)]
 pub struct Chunk {
     pub id: String,
     pub text: String,
     pub clean: String,
+    pub tokens: Vec<String>,
+    pub positions: HashMap<String, Vec<usize>>,
 }
 
 #[derive(Clone, Debug)]
@@ -25,6 +29,12 @@ impl Default for ChunkingConfig {
     }
 }
 
+fn build_chunk(id: String, text: String) -> Chunk {
+    let clean = normalize_text(&text);
+    let (tokens, positions) = tokenize_with_positions(&clean);
+    Chunk { id, text, clean, tokens, positions }
+}
+
 pub fn chunk_document(doc: &Document, config: &ChunkingConfig) -> Vec<Chunk> {
     let words: Vec<&str> = doc.text.split_whitespace().collect();
     if words.is_empty() {
@@ -41,22 +51,20 @@ pub fn chunk_document(doc: &Document, config: &ChunkingConfig) -> Vec<Chunk> {
                 let mut text = last.text.clone();
                 text.push(' ');
                 text.push_str(&words[i..].join(" "));
-                last.text = text;
-                last.clean = normalize_text(&last.text);
+                let rebuilt = build_chunk(last.id.clone(), text);
+                *last = rebuilt;
             } else {
                 let text = words[i..].join(" ");
-                let clean = normalize_text(&text);
                 let id = format!("{}::chunk{}", doc.id, chunks.len() + 1);
-                chunks.push(Chunk { id, text, clean });
+                chunks.push(build_chunk(id, text));
             }
             break;
         }
 
         let size = config.target_words.min(config.max_words);
         let text = words[i..i + size].join(" ");
-        let clean = normalize_text(&text);
         let id = format!("{}::chunk{}", doc.id, chunks.len() + 1);
-        chunks.push(Chunk { id, text, clean });
+        chunks.push(build_chunk(id, text));
         i += size;
     }
 

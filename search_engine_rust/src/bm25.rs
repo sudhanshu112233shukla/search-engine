@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use crate::processing::Chunk;
-use crate::utils::tokenize;
 
 #[derive(Clone, Debug)]
 pub struct TermEntry {
@@ -24,11 +23,11 @@ impl BM25Index {
         let mut doc_lens = Vec::with_capacity(chunks.len());
 
         for (doc_id, chunk) in chunks.iter().enumerate() {
-            let tokens = tokenize(&chunk.clean);
+            let tokens = &chunk.tokens;
             doc_lens.push(tokens.len());
             let mut tf: HashMap<String, u32> = HashMap::new();
             for token in tokens {
-                *tf.entry(token).or_insert(0) += 1;
+                *tf.entry(token.clone()).or_insert(0) += 1;
             }
             for (term, freq) in tf {
                 let entry = terms.entry(term).or_insert(TermEntry { df: 0, postings: Vec::new() });
@@ -43,17 +42,16 @@ impl BM25Index {
         Self { terms, doc_lens, avg_doc_len, k1, b }
     }
 
-    pub fn search(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
-        let tokens = tokenize(query);
-        if tokens.is_empty() || self.doc_lens.is_empty() {
+    pub fn search(&self, query_tokens: &[String], top_k: usize) -> Vec<(usize, f32)> {
+        if query_tokens.is_empty() || self.doc_lens.is_empty() {
             return Vec::new();
         }
 
         let n_docs = self.doc_lens.len() as f32;
         let mut scores = vec![0.0f32; self.doc_lens.len()];
 
-        for term in tokens {
-            if let Some(entry) = self.terms.get(&term) {
+        for term in query_tokens {
+            if let Some(entry) = self.terms.get(term) {
                 let df = entry.df as f32;
                 let idf = (1.0 + (n_docs - df + 0.5) / (df + 0.5)).ln();
                 for (doc_id, tf) in &entry.postings {

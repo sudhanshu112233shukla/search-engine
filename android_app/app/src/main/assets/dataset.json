@@ -1,0 +1,12 @@
+[
+  { "id": "1", "text": "BM25 is a ranking function used by search engines. It normalizes term frequency by document length." },
+  { "id": "2", "text": "Vector search uses embeddings to capture semantic similarity between query and document." },
+  { "id": "3", "text": "Hybrid ranking combines keyword and semantic scores for better retrieval quality." },
+  { "id": "4", "text": "Answer extraction returns the most relevant sentence from a passage." },
+  { "id": "5", "text": "Offline-first search stores data on device and syncs when online." },
+  { "id": "6", "text": "An inverted index maps terms to documents and enables fast keyword search." },
+  { "id": "7", "text": "Cosine similarity compares vectors to measure semantic closeness." },
+  { "id": "8", "text": "Stopwords are common words removed to reduce noise in search." },
+  { "id": "9", "text": "Chunking splits documents into passages for better matching." },
+  { "id": "10", "text": "Exact match and phrase match signals improve precision." }
+]

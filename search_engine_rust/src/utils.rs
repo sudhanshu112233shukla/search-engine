@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 const STOPWORDS: &[&str] = &[
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "as", "at",
     "be", "because", "been", "before", "being", "below", "between", "both", "but", "by",
@@ -20,6 +22,12 @@ const STOPWORDS: &[&str] = &[
     "you", "your", "yours", "yourself", "yourselves",
 ];
 
+const SYNONYMS: &[(&str, &[&str])] = &[
+    ("bm25", &["ranking", "tfidf", "tf-idf"]),
+    ("vector", &["embedding", "semantic"]),
+    ("search", &["retrieve", "retrieval"]),
+];
+
 pub fn normalize_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut prev_space = false;
@@ -36,6 +44,10 @@ pub fn normalize_text(text: &str) -> String {
     out.trim().to_string()
 }
 
+pub fn is_stopword(token: &str) -> bool {
+    STOPWORDS.iter().any(|w| *w == token)
+}
+
 pub fn tokenize(text: &str) -> Vec<String> {
     let normalized = normalize_text(text);
     normalized
@@ -45,8 +57,35 @@ pub fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn is_stopword(token: &str) -> bool {
-    STOPWORDS.iter().any(|w| *w == token)
+pub fn tokenize_with_positions(text: &str) -> (Vec<String>, HashMap<String, Vec<usize>>) {
+    let normalized = normalize_text(text);
+    let mut tokens = Vec::new();
+    let mut positions: HashMap<String, Vec<usize>> = HashMap::new();
+
+    for (idx, raw) in normalized.split_whitespace().enumerate() {
+        if is_stopword(raw) {
+            continue;
+        }
+        let token = raw.to_string();
+        tokens.push(token.clone());
+        positions.entry(token).or_default().push(idx);
+    }
+
+    (tokens, positions)
+}
+
+pub fn process_query(query: &str) -> Vec<String> {
+    let base = tokenize(query);
+    let mut expanded = Vec::with_capacity(base.len());
+    for t in base.iter() {
+        expanded.push(t.clone());
+        if let Some(syns) = SYNONYMS.iter().find(|(k, _)| *k == t).map(|(_, v)| *v) {
+            for s in syns {
+                expanded.push(s.to_string());
+            }
+        }
+    }
+    expanded
 }
 
 pub fn split_sentences(text: &str) -> Vec<String> {
@@ -67,4 +106,38 @@ pub fn split_sentences(text: &str) -> Vec<String> {
         sentences.push(trimmed.to_string());
     }
     sentences
+}
+
+pub fn make_snippet(text: &str, tokens: &[String], max_len: usize) -> String {
+    if text.len() <= max_len {
+        return highlight_terms(text, tokens);
+    }
+
+    let lower = text.to_lowercase();
+    let mut start = 0usize;
+    for t in tokens {
+        if let Some(pos) = lower.find(t) {
+            start = pos.saturating_sub(40);
+            break;
+        }
+    }
+    let end = (start + max_len).min(text.len());
+    let snippet = text[start..end].trim().to_string();
+    highlight_terms(&snippet, tokens)
+}
+
+fn highlight_terms(text: &str, tokens: &[String]) -> String {
+    let mut out = String::new();
+    for word in text.split_whitespace() {
+        let clean = word.to_lowercase().replace(|c: char| !c.is_ascii_alphanumeric(), "");
+        if tokens.iter().any(|t| t == &clean) {
+            out.push('[');
+            out.push_str(word);
+            out.push(']');
+        } else {
+            out.push_str(word);
+        }
+        out.push(' ');
+    }
+    out.trim().to_string()
 }

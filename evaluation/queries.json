@@ -1,0 +1,19 @@
+{
+  "queries": [
+    {
+      "query": "what is bm25",
+      "relevant_docs": ["1"],
+      "expected_answer": "BM25 is a ranking function"
+    },
+    {
+      "query": "what is vector search",
+      "relevant_docs": ["2"],
+      "expected_answer": "Vector search uses embeddings"
+    },
+    {
+      "query": "hybrid ranking signals",
+      "relevant_docs": ["3"],
+      "expected_answer": "Hybrid ranking combines keyword and semantic scores"
+    }
+  ]
+}
