@@ -1,0 +1,9 @@
+node_modules/
+data/raw/*
+data/processed/*
+data/index/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/index/.gitkeep
+*.log
+.DS_Store
