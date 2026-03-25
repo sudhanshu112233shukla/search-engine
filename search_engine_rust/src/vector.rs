@@ -2,30 +2,174 @@ use crate::embedding::embed_text;
 use crate::processing::Chunk;
 
 #[derive(Clone, Debug)]
+pub struct AnnConfig {
+    pub enabled: bool,
+    pub nlist: usize,
+    pub nprobe: usize,
+    pub max_iters: usize,
+    pub sample_size: usize,
+}
+
+#[derive(Clone, Debug)]
+struct IVFIndex {
+    centroids: Vec<Vec<f32>>,
+    lists: Vec<Vec<usize>>,
+}
+
+#[derive(Clone, Debug)]
 pub struct VectorIndex {
-    pub vectors: Vec<Vec<f32>>,
     pub dims: usize,
     pub ngram_min: usize,
     pub ngram_max: usize,
+    pub quantized: bool,
+    pub vectors_f32: Option<Vec<Vec<f32>>>,
+    pub vectors_i8: Option<Vec<i8>>,
+    pub scales: Option<Vec<f32>>,
+    ivf: Option<IVFIndex>,
+    ann_nprobe: usize,
 }
 
 impl VectorIndex {
-    pub fn build(chunks: &[Chunk], dims: usize, ngram_min: usize, ngram_max: usize) -> Self {
-        let mut vectors = Vec::with_capacity(chunks.len());
-        for chunk in chunks {
-            let v = embed_text(&chunk.clean, dims, ngram_min, ngram_max);
-            vectors.push(v);
+    pub fn build(
+        chunks: &[Chunk],
+        dims: usize,
+        ngram_min: usize,
+        ngram_max: usize,
+        quantize: bool,
+        ann: &AnnConfig,
+    ) -> Self {
+        let use_ann = ann.enabled && chunks.len() >= ann.nlist.max(1);
+        let mut centroids: Vec<Vec<f32>> = Vec::new();
+
+        if use_ann {
+            let sample = sample_vectors(chunks, dims, ngram_min, ngram_max, ann.sample_size);
+            centroids = kmeans(&sample, ann.nlist, ann.max_iters);
         }
-        Self { vectors, dims, ngram_min, ngram_max }
+
+        let mut lists: Vec<Vec<usize>> = if use_ann {
+            vec![Vec::new(); centroids.len()]
+        } else {
+            Vec::new()
+        };
+
+        if quantize {
+            let mut vectors_i8 = Vec::with_capacity(chunks.len() * dims);
+            let mut scales = Vec::with_capacity(chunks.len());
+            for (i, chunk) in chunks.iter().enumerate() {
+                let v = embed_text(&chunk.clean, dims, ngram_min, ngram_max);
+                if use_ann {
+                    let cid = nearest_centroid(&v, &centroids);
+                    lists[cid].push(i);
+                }
+                let (q, scale) = quantize_vec(&v);
+                vectors_i8.extend_from_slice(&q);
+                scales.push(scale);
+            }
+            let ivf = if use_ann { Some(IVFIndex { centroids, lists }) } else { None };
+            Self {
+                dims,
+                ngram_min,
+                ngram_max,
+                quantized: true,
+                vectors_f32: None,
+                vectors_i8: Some(vectors_i8),
+                scales: Some(scales),
+                ivf,
+                ann_nprobe: ann.nprobe.max(1),
+            }
+        } else {
+            let mut vectors = Vec::with_capacity(chunks.len());
+            for (i, chunk) in chunks.iter().enumerate() {
+                let v = embed_text(&chunk.clean, dims, ngram_min, ngram_max);
+                if use_ann {
+                    let cid = nearest_centroid(&v, &centroids);
+                    lists[cid].push(i);
+                }
+                vectors.push(v);
+            }
+            let ivf = if use_ann { Some(IVFIndex { centroids, lists }) } else { None };
+            Self {
+                dims,
+                ngram_min,
+                ngram_max,
+                quantized: false,
+                vectors_f32: Some(vectors),
+                vectors_i8: None,
+                scales: None,
+                ivf,
+                ann_nprobe: ann.nprobe.max(1),
+            }
+        }
     }
 
     pub fn search(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
-        if self.vectors.is_empty() {
-            return Vec::new();
+        if self.ivf.is_some() {
+            return self.search_ann(query, top_k);
         }
+        if self.quantized {
+            return self.search_quantized(query, top_k);
+        }
+        self.search_full(query, top_k)
+    }
+
+    pub fn add_chunks(&mut self, chunks: &[Chunk]) {
+        if chunks.is_empty() {
+            return;
+        }
+        let base_id = self.len();
+        for (offset, chunk) in chunks.iter().enumerate() {
+            let doc_id = base_id + offset;
+            let v = embed_text(&chunk.clean, self.dims, self.ngram_min, self.ngram_max);
+            if let Some(ivf) = &mut self.ivf {
+                let cid = nearest_centroid(&v, &ivf.centroids);
+                ivf.lists[cid].push(doc_id);
+            }
+            if self.quantized {
+                let (q, scale) = quantize_vec(&v);
+                if let Some(store) = &mut self.vectors_i8 {
+                    store.extend_from_slice(&q);
+                }
+                if let Some(scales) = &mut self.scales {
+                    scales.push(scale);
+                }
+            } else if let Some(store) = &mut self.vectors_f32 {
+                store.push(v);
+            }
+        }
+    }
+
+    pub fn approx_bytes(&self) -> usize {
+        if self.quantized {
+            let v = self.vectors_i8.as_ref().map(|v| v.len()).unwrap_or(0);
+            let s = self.scales.as_ref().map(|s| s.len()).unwrap_or(0);
+            v * std::mem::size_of::<i8>() + s * std::mem::size_of::<f32>()
+        } else {
+            let mut total = 0usize;
+            if let Some(vs) = &self.vectors_f32 {
+                for v in vs {
+                    total += v.len() * std::mem::size_of::<f32>();
+                }
+            }
+            total
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        if self.quantized {
+            self.scales.as_ref().map(|s| s.len()).unwrap_or(0)
+        } else {
+            self.vectors_f32.as_ref().map(|v| v.len()).unwrap_or(0)
+        }
+    }
+
+    fn search_full(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
+        let vectors = match &self.vectors_f32 {
+            Some(v) if !v.is_empty() => v,
+            _ => return Vec::new(),
+        };
         let q = embed_text(query, self.dims, self.ngram_min, self.ngram_max);
-        let mut results = Vec::with_capacity(self.vectors.len());
-        for (i, v) in self.vectors.iter().enumerate() {
+        let mut results = Vec::with_capacity(vectors.len());
+        for (i, v) in vectors.iter().enumerate() {
             let mut dot = 0.0f32;
             for j in 0..self.dims {
                 dot += q[j] * v[j];
@@ -36,4 +180,196 @@ impl VectorIndex {
         results.truncate(top_k);
         results
     }
+
+    fn search_quantized(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
+        let vectors_i8 = match &self.vectors_i8 {
+            Some(v) if !v.is_empty() => v,
+            _ => return Vec::new(),
+        };
+        let scales = match &self.scales {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+
+        let q = embed_text(query, self.dims, self.ngram_min, self.ngram_max);
+        let mut results = Vec::with_capacity(scales.len());
+        for (i, scale) in scales.iter().enumerate() {
+            let base = i * self.dims;
+            let mut dot = 0.0f32;
+            for j in 0..self.dims {
+                let v = vectors_i8[base + j] as f32 * *scale;
+                dot += q[j] * v;
+            }
+            results.push((i, dot));
+        }
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(top_k);
+        results
+    }
+
+    fn search_ann(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
+        let ivf = match &self.ivf {
+            Some(ivf) => ivf,
+            None => {
+                return if self.quantized {
+                    self.search_quantized(query, top_k)
+                } else {
+                    self.search_full(query, top_k)
+                };
+            }
+        };
+
+        let q = embed_text(query, self.dims, self.ngram_min, self.ngram_max);
+        let mut centroid_scores: Vec<(usize, f32)> = ivf
+            .centroids
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i, dot(&q, c)))
+            .collect();
+        centroid_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        centroid_scores.truncate(self.ann_nprobe.min(centroid_scores.len()));
+
+        let mut candidates: Vec<usize> = Vec::new();
+        for (cid, _) in centroid_scores {
+            candidates.extend_from_slice(&ivf.lists[cid]);
+        }
+        if candidates.is_empty() {
+            return if self.quantized {
+                self.search_quantized(query, top_k)
+            } else {
+                self.search_full(query, top_k)
+            };
+        }
+
+        let mut results = Vec::with_capacity(candidates.len());
+        if self.quantized {
+            let vectors_i8 = match &self.vectors_i8 {
+                Some(v) => v,
+                None => return Vec::new(),
+            };
+            let scales = match &self.scales {
+                Some(s) => s,
+                None => return Vec::new(),
+            };
+            for &i in &candidates {
+                let base = i * self.dims;
+                let mut dotv = 0.0f32;
+                let scale = scales[i];
+                for j in 0..self.dims {
+                    let v = vectors_i8[base + j] as f32 * scale;
+                    dotv += q[j] * v;
+                }
+                results.push((i, dotv));
+            }
+        } else if let Some(vectors) = &self.vectors_f32 {
+            for &i in &candidates {
+                let v = &vectors[i];
+                results.push((i, dot(&q, v)));
+            }
+        }
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(top_k);
+        results
+    }
+}
+
+fn sample_vectors(
+    chunks: &[Chunk],
+    dims: usize,
+    ngram_min: usize,
+    ngram_max: usize,
+    sample_size: usize,
+) -> Vec<Vec<f32>> {
+    if chunks.is_empty() {
+        return Vec::new();
+    }
+    let target = sample_size.max(1).min(chunks.len());
+    if target == chunks.len() {
+        return chunks
+            .iter()
+            .map(|c| embed_text(&c.clean, dims, ngram_min, ngram_max))
+            .collect();
+    }
+
+    let step = (chunks.len() / target).max(1);
+    let mut samples = Vec::with_capacity(target);
+    let mut idx = 0usize;
+    while samples.len() < target && idx < chunks.len() {
+        let c = &chunks[idx];
+        samples.push(embed_text(&c.clean, dims, ngram_min, ngram_max));
+        idx += step;
+    }
+    samples
+}
+
+fn kmeans(samples: &[Vec<f32>], k: usize, iters: usize) -> Vec<Vec<f32>> {
+    if samples.is_empty() || k == 0 {
+        return Vec::new();
+    }
+    let dims = samples[0].len();
+    let k = k.min(samples.len());
+    let step = (samples.len() / k).max(1);
+    let mut centroids: Vec<Vec<f32>> = (0..k)
+        .map(|i| samples[(i * step).min(samples.len() - 1)].clone())
+        .collect();
+
+    for _ in 0..iters.max(1) {
+        let mut sums = vec![vec![0.0f32; dims]; k];
+        let mut counts = vec![0usize; k];
+        for v in samples {
+            let cid = nearest_centroid(v, &centroids);
+            counts[cid] += 1;
+            for d in 0..dims {
+                sums[cid][d] += v[d];
+            }
+        }
+        for i in 0..k {
+            if counts[i] == 0 {
+                continue;
+            }
+            for d in 0..dims {
+                centroids[i][d] = sums[i][d] / counts[i] as f32;
+            }
+        }
+    }
+    centroids
+}
+
+fn nearest_centroid(v: &[f32], centroids: &[Vec<f32>]) -> usize {
+    let mut best = 0usize;
+    let mut best_score = f32::MIN;
+    for (i, c) in centroids.iter().enumerate() {
+        let score = dot(v, c);
+        if score > best_score {
+            best_score = score;
+            best = i;
+        }
+    }
+    best
+}
+
+fn dot(a: &[f32], b: &[f32]) -> f32 {
+    let mut total = 0.0f32;
+    for i in 0..a.len() {
+        total += a[i] * b[i];
+    }
+    total
+}
+
+fn quantize_vec(v: &[f32]) -> (Vec<i8>, f32) {
+    let mut max_abs = 0.0f32;
+    for val in v {
+        let abs = val.abs();
+        if abs > max_abs {
+            max_abs = abs;
+        }
+    }
+    let scale = if max_abs < 1e-6 { 1.0 } else { max_abs / 127.0 };
+    let mut out = Vec::with_capacity(v.len());
+    for val in v {
+        let q = (val / scale).round().clamp(-127.0, 127.0) as i8;
+        out.push(q);
+    }
+    (out, scale)
 }

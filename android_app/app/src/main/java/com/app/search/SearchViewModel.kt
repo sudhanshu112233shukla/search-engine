@@ -1,4 +1,4 @@
-package com.app.search
+﻿package com.app.search
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
@@ -18,6 +18,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 data class SearchUiState(
     val query: String = "",
     val loading: Boolean = false,
+    val engineLoading: Boolean = false,
+    val engineReady: Boolean = false,
     val answer: Answer? = null,
     val answers: List<Answer> = emptyList(),
     val results: List<ResultItem> = emptyList(),
@@ -39,9 +41,23 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
 
     fun initIfNeeded(datasetPath: String) {
         if (initialized.compareAndSet(false, true)) {
-            NativeSearchEngine.init(datasetPath)
             val history = historyStore.load()
-            _state.update { it.copy(history = history) }
+            _state.update { it.copy(history = history, engineLoading = true, engineReady = false) }
+            viewModelScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    runCatching {
+                        NativeSearchEngine.init(datasetPath)
+                        true
+                    }.getOrDefault(false)
+                }
+                _state.update {
+                    it.copy(
+                        engineLoading = false,
+                        engineReady = ok,
+                        error = if (!ok) "Failed to initialize search engine" else null
+                    )
+                }
+            }
         }
     }
 
@@ -51,6 +67,10 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
         searchJob?.cancel()
         if (query.isBlank()) {
             _state.update { it.copy(loading = false, answer = null, answers = emptyList(), results = emptyList()) }
+            return
+        }
+        if (!_state.value.engineReady) {
+            _state.update { it.copy(loading = false, error = "Indexing data... please wait") }
             return
         }
 

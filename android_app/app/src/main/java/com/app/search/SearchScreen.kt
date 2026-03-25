@@ -1,4 +1,4 @@
-package com.app.search
+﻿package com.app.search
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -113,6 +113,12 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        if (state.engineLoading) {
+            IndexingBanner("Building local index…")
+        } else if (!state.engineReady) {
+            IndexingBanner("Search engine not ready")
+        }
+
         if (state.query.isBlank()) {
             SuggestionList(state.history, onClick = { viewModel.onSuggestion(it) })
         }
@@ -143,6 +149,22 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
 }
 
 @Composable
+fun IndexingBanner(text: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(12.dp),
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+}
+
+@Composable
 fun AnswerCard(answer: Answer, answers: List<Answer>) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -159,7 +181,7 @@ fun AnswerCard(answer: Answer, answers: List<Answer>) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Other possible answers", style = MaterialTheme.typography.bodySmall)
                 answers.drop(1).forEach { a ->
-                    Text("� ${a.text}", style = MaterialTheme.typography.bodySmall)
+                    Text("• ${a.text}", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

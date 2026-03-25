@@ -1,9 +1,10 @@
 use std::ffi::{CStr, CString};
 use std::fs;
+use std::path::PathBuf;
 use std::os::raw::c_char;
 
 use crate::{Config, Document, SearchEngine};
-use crate::{init_engine_once, search};
+use crate::{init_engine_once, search, update_documents};
 
 const EMPTY_JSON: &str = "{\"answer\":null,\"answers\":[],\"results\":[]}";
 
@@ -43,7 +44,14 @@ pub extern "C" fn init_engine_from_file(path: *const c_char) {
         Some(d) => d,
         None => return,
     };
-    let engine = SearchEngine::new(docs, Config::default());
+    let mut config = Config::default();
+    let mut store_path = PathBuf::from(path_str.as_ref());
+    store_path.set_extension("textstore");
+    config.text_store_path = Some(store_path.to_string_lossy().to_string());
+    config.text_store_mmap = true;
+    config.vector_quantize = true;
+    config.ann_enabled = true;
+    let engine = SearchEngine::new(docs, config);
     if !init_engine_once(engine) {
         eprintln!("[ffi] engine already initialized; skipping");
     }
@@ -61,7 +69,10 @@ pub extern "C" fn init_engine_from_json(json: *const c_char) {
         Some(d) => d,
         None => return,
     };
-    let engine = SearchEngine::new(docs, Config::default());
+    let mut config = Config::default();
+    config.vector_quantize = true;
+    config.ann_enabled = true;
+    let engine = SearchEngine::new(docs, config);
     if !init_engine_once(engine) {
         eprintln!("[ffi] engine already initialized; skipping");
     }
@@ -78,6 +89,49 @@ pub extern "C" fn search_query(query: *const c_char) -> *mut c_char {
     match CString::new(json) {
         Ok(s) => s.into_raw(),
         Err(_) => CString::new(EMPTY_JSON).unwrap().into_raw(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn update_engine_from_file(path: *const c_char) {
+    if path.is_null() {
+        eprintln!("[ffi] update_engine_from_file: null path");
+        return;
+    }
+    let cstr = unsafe { CStr::from_ptr(path) };
+    let path_str = cstr.to_string_lossy();
+    let data = match fs::read_to_string(path_str.as_ref()) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("[ffi] update file read error: {err}");
+            return;
+        }
+    };
+    let docs = match parse_docs(&data) {
+        Some(d) => d,
+        None => return,
+    };
+    let added = update_documents(docs);
+    if added == 0 {
+        eprintln!("[ffi] update skipped (engine not initialized or no docs)");
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn update_engine_from_json(json: *const c_char) {
+    if json.is_null() {
+        eprintln!("[ffi] update_engine_from_json: null input");
+        return;
+    }
+    let cstr = unsafe { CStr::from_ptr(json) };
+    let json_str = cstr.to_string_lossy();
+    let docs = match parse_docs(json_str.as_ref()) {
+        Some(d) => d,
+        None => return,
+    };
+    let added = update_documents(docs);
+    if added == 0 {
+        eprintln!("[ffi] update skipped (engine not initialized or no docs)");
     }
 }
 
@@ -100,7 +154,7 @@ mod jni_bridge {
     use std::ffi::CString;
 
     #[no_mangle]
-    pub extern "system" fn Java_com_app_SearchEngine_init(
+    pub extern "system" fn Java_com_app_search_NativeSearchEngine_init(
         env: JNIEnv,
         _class: JClass,
         path: JString,
@@ -115,7 +169,22 @@ mod jni_bridge {
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_com_app_SearchEngine_search(
+    pub extern "system" fn Java_com_app_search_NativeSearchEngine_update(
+        env: JNIEnv,
+        _class: JClass,
+        path: JString,
+    ) {
+        let path_str = match env.get_string(&path) {
+            Ok(s) => s.into(),
+            Err(_) => "".to_string(),
+        };
+        if let Ok(c_path) = CString::new(path_str) {
+            super::update_engine_from_file(c_path.as_ptr());
+        }
+    }
+
+    #[no_mangle]
+    pub extern "system" fn Java_com_app_search_NativeSearchEngine_search(
         env: JNIEnv,
         _class: JClass,
         query: JString,

@@ -31,14 +31,18 @@ fn length_penalty(sentence: &str) -> f32 {
     1.0 / (1.0 + (words / 25.0))
 }
 
-pub fn extract_answers(query: &str, ranked: &[Ranked], chunks: &[Chunk]) -> Vec<AnswerCandidate> {
+pub fn extract_answers<F>(query: &str, ranked: &[Ranked], chunks: &[Chunk], get_text: F) -> Vec<AnswerCandidate>
+where
+    F: Fn(usize) -> String,
+{
     let query_tokens = tokenize(query);
     let clean_query = normalize_text(query);
     let mut candidates: Vec<AnswerCandidate> = Vec::new();
 
     for r in ranked.iter().take(10) {
         let chunk = &chunks[r.doc_id];
-        let sentences = split_sentences(&chunk.text);
+        let text = get_text(r.doc_id);
+        let sentences = split_sentences(&text);
         for sentence in sentences {
             let overlap = keyword_overlap(&sentence, &query_tokens);
             let exact = if !clean_query.is_empty() && normalize_text(&sentence).contains(&clean_query) { 1.0 } else { 0.0 };

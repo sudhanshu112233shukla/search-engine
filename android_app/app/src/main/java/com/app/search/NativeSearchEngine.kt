@@ -1,4 +1,4 @@
-package com.app.search
+﻿package com.app.search
 
 object NativeSearchEngine {
     init {
@@ -6,5 +6,6 @@ object NativeSearchEngine {
     }
 
     external fun init(path: String)
+    external fun update(path: String)
     external fun search(query: String): String
 }

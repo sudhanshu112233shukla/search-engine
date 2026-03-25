@@ -10,6 +10,8 @@ pub struct Chunk {
     pub clean: String,
     pub tokens: Vec<String>,
     pub positions: HashMap<String, Vec<usize>>,
+    pub text_offset: u64,
+    pub text_len: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -32,7 +34,15 @@ impl Default for ChunkingConfig {
 fn build_chunk(id: String, text: String) -> Chunk {
     let clean = normalize_text(&text);
     let (tokens, positions) = tokenize_with_positions(&clean);
-    Chunk { id, text, clean, tokens, positions }
+    Chunk {
+        id,
+        text,
+        clean,
+        tokens,
+        positions,
+        text_offset: 0,
+        text_len: 0,
+    }
 }
 
 pub fn chunk_document(doc: &Document, config: &ChunkingConfig) -> Vec<Chunk> {

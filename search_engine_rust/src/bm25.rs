@@ -15,6 +15,7 @@ pub struct BM25Index {
     pub avg_doc_len: f32,
     pub k1: f32,
     pub b: f32,
+    pub total_len: usize,
 }
 
 impl BM25Index {
@@ -39,7 +40,7 @@ impl BM25Index {
         let total_len: usize = doc_lens.iter().sum();
         let avg_doc_len = if doc_lens.is_empty() { 0.0 } else { total_len as f32 / doc_lens.len() as f32 };
 
-        Self { terms, doc_lens, avg_doc_len, k1, b }
+        Self { terms, doc_lens, avg_doc_len, k1, b, total_len }
     }
 
     pub fn search(&self, query_tokens: &[String], top_k: usize) -> Vec<(usize, f32)> {
@@ -73,5 +74,33 @@ impl BM25Index {
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         results.truncate(top_k);
         results
+    }
+
+    pub fn add_chunks(&mut self, chunks: &[Chunk]) {
+        if chunks.is_empty() {
+            return;
+        }
+        let mut next_id = self.doc_lens.len();
+        for chunk in chunks {
+            let tokens = &chunk.tokens;
+            self.doc_lens.push(tokens.len());
+            self.total_len += tokens.len();
+
+            let mut tf: HashMap<String, u32> = HashMap::new();
+            for token in tokens {
+                *tf.entry(token.clone()).or_insert(0) += 1;
+            }
+            for (term, freq) in tf {
+                let entry = self.terms.entry(term).or_insert(TermEntry { df: 0, postings: Vec::new() });
+                entry.df += 1;
+                entry.postings.push((next_id, freq));
+            }
+            next_id += 1;
+        }
+        self.avg_doc_len = if self.doc_lens.is_empty() {
+            0.0
+        } else {
+            self.total_len as f32 / self.doc_lens.len() as f32
+        };
     }
 }

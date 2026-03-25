@@ -14,6 +14,12 @@ void init_engine_from_json(const char* json);
 // Returns a heap-allocated JSON string. Caller must free with free_string.
 char* search_query(const char* query);
 
+// Incrementally update engine from a JSON file path.
+void update_engine_from_file(const char* path);
+
+// Incrementally update engine from a JSON string.
+void update_engine_from_json(const char* json);
+
 // Frees a string allocated by search_query.
 void free_string(char* ptr);
 
