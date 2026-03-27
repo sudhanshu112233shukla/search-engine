@@ -51,6 +51,9 @@ pub extern "C" fn init_engine_from_file(path: *const c_char) {
     config.text_store_mmap = true;
     config.vector_quantize = true;
     config.ann_enabled = true;
+    config.pq_enabled = true;
+    config.pq_m = 8;
+    config.pq_k = 256;
     config.low_memory = true;
     let engine = SearchEngine::new(docs, config);
     if !init_engine_once(engine) {

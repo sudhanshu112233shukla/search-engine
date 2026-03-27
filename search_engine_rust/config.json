@@ -2,5 +2,7 @@
   "crawl_limit": 10000,
   "max_depth": 3,
   "timeout_ms": 5000,
-  "storage_path": "./data"
+  "storage_path": "./data",
+  "use_disk_frontier": true,
+  "frontier_path": null
 }

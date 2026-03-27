@@ -1,7 +1,8 @@
-use crate::embedding::embed_text;
+﻿use crate::embedding::embed_text;
 use crate::processing::Chunk;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AnnConfig {
     pub enabled: bool,
     pub nlist: usize,
@@ -10,10 +11,42 @@ pub struct AnnConfig {
     pub sample_size: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PQConfig {
+    pub enabled: bool,
+    pub m: usize,
+    pub k: usize,
+    pub max_iters: usize,
+    pub sample_size: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct IVFIndex {
     centroids: Vec<Vec<f32>>,
     lists: Vec<Vec<usize>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VectorPersist {
+    pub dims: usize,
+    pub ngram_min: usize,
+    pub ngram_max: usize,
+    pub quantized: bool,
+    pub vectors_f32: Option<Vec<Vec<f32>>>,
+    pub vectors_i8: Option<Vec<i8>>,
+    pub scales: Option<Vec<f32>>,
+    pub ivf: Option<IVFIndex>,
+    pub ann_nprobe: usize,
+    pub pq: Option<PQIndex>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct PQIndex {
+    m: usize,
+    k: usize,
+    sub_dim: usize,
+    codebooks: Vec<Vec<Vec<f32>>>,
+    codes: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -27,6 +60,7 @@ pub struct VectorIndex {
     pub scales: Option<Vec<f32>>,
     ivf: Option<IVFIndex>,
     ann_nprobe: usize,
+    pq: Option<PQIndex>,
 }
 
 impl VectorIndex {
@@ -37,8 +71,10 @@ impl VectorIndex {
         ngram_max: usize,
         quantize: bool,
         ann: &AnnConfig,
+        pq: &PQConfig,
     ) -> Self {
         let use_ann = ann.enabled && chunks.len() >= ann.nlist.max(1);
+        let use_pq = pq.enabled && dims % pq.m.max(1) == 0;
         let mut centroids: Vec<Vec<f32>> = Vec::new();
 
         if use_ann {
@@ -51,6 +87,40 @@ impl VectorIndex {
         } else {
             Vec::new()
         };
+
+        if use_pq {
+            let sample = sample_vectors(chunks, dims, ngram_min, ngram_max, pq.sample_size);
+            let pq_index = build_pq(&sample, pq.m, pq.k, pq.max_iters, dims);
+            let mut codes = Vec::with_capacity(chunks.len() * pq_index.m);
+            for (i, chunk) in chunks.iter().enumerate() {
+                let v = embed_text(&chunk.clean, dims, ngram_min, ngram_max);
+                if use_ann {
+                    let cid = nearest_centroid(&v, &centroids);
+                    lists[cid].push(i);
+                }
+                encode_pq(&v, &pq_index, &mut codes);
+            }
+            let ivf = if use_ann { Some(IVFIndex { centroids, lists }) } else { None };
+            let pq_index = PQIndex {
+                m: pq_index.m,
+                k: pq_index.k,
+                sub_dim: pq_index.sub_dim,
+                codebooks: pq_index.codebooks,
+                codes,
+            };
+            return Self {
+                dims,
+                ngram_min,
+                ngram_max,
+                quantized: false,
+                vectors_f32: None,
+                vectors_i8: None,
+                scales: None,
+                ivf,
+                ann_nprobe: ann.nprobe.max(1),
+                pq: Some(pq_index),
+            };
+        }
 
         if quantize {
             let mut vectors_i8 = Vec::with_capacity(chunks.len() * dims);
@@ -76,6 +146,7 @@ impl VectorIndex {
                 scales: Some(scales),
                 ivf,
                 ann_nprobe: ann.nprobe.max(1),
+                pq: None,
             }
         } else {
             let mut vectors = Vec::with_capacity(chunks.len());
@@ -98,11 +169,15 @@ impl VectorIndex {
                 scales: None,
                 ivf,
                 ann_nprobe: ann.nprobe.max(1),
+                pq: None,
             }
         }
     }
 
     pub fn search(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
+        if self.pq.is_some() {
+            return self.search_pq(query, top_k);
+        }
         if self.ivf.is_some() {
             return self.search_ann(query, top_k);
         }
@@ -124,6 +199,10 @@ impl VectorIndex {
                 let cid = nearest_centroid(&v, &ivf.centroids);
                 ivf.lists[cid].push(doc_id);
             }
+            if let Some(pq) = &mut self.pq {
+                encode_pq(&v, pq, &mut pq.codes);
+                continue;
+            }
             if self.quantized {
                 let (q, scale) = quantize_vec(&v);
                 if let Some(store) = &mut self.vectors_i8 {
@@ -139,6 +218,15 @@ impl VectorIndex {
     }
 
     pub fn approx_bytes(&self) -> usize {
+        if let Some(pq) = &self.pq {
+            let codebook_bytes: usize = pq
+                .codebooks
+                .iter()
+                .map(|cb| cb.len() * cb[0].len() * std::mem::size_of::<f32>())
+                .sum();
+            let codes_bytes = pq.codes.len() * std::mem::size_of::<u8>();
+            return codebook_bytes + codes_bytes;
+        }
         if self.quantized {
             let v = self.vectors_i8.as_ref().map(|v| v.len()).unwrap_or(0);
             let s = self.scales.as_ref().map(|s| s.len()).unwrap_or(0);
@@ -155,10 +243,43 @@ impl VectorIndex {
     }
 
     pub fn len(&self) -> usize {
+        if let Some(pq) = &self.pq {
+            return pq.codes.len() / pq.m.max(1);
+        }
         if self.quantized {
             self.scales.as_ref().map(|s| s.len()).unwrap_or(0)
         } else {
             self.vectors_f32.as_ref().map(|v| v.len()).unwrap_or(0)
+        }
+    }
+
+    pub fn to_persist(&self) -> VectorPersist {
+        VectorPersist {
+            dims: self.dims,
+            ngram_min: self.ngram_min,
+            ngram_max: self.ngram_max,
+            quantized: self.quantized,
+            vectors_f32: self.vectors_f32.clone(),
+            vectors_i8: self.vectors_i8.clone(),
+            scales: self.scales.clone(),
+            ivf: self.ivf.clone(),
+            ann_nprobe: self.ann_nprobe,
+            pq: self.pq.clone(),
+        }
+    }
+
+    pub fn from_persist(persist: VectorPersist) -> Self {
+        Self {
+            dims: persist.dims,
+            ngram_min: persist.ngram_min,
+            ngram_max: persist.ngram_max,
+            quantized: persist.quantized,
+            vectors_f32: persist.vectors_f32,
+            vectors_i8: persist.vectors_i8,
+            scales: persist.scales,
+            ivf: persist.ivf,
+            ann_nprobe: persist.ann_nprobe.max(1),
+            pq: persist.pq,
         }
     }
 
@@ -170,11 +291,11 @@ impl VectorIndex {
         let q = embed_text(query, self.dims, self.ngram_min, self.ngram_max);
         let mut results = Vec::with_capacity(vectors.len());
         for (i, v) in vectors.iter().enumerate() {
-            let mut dot = 0.0f32;
+            let mut dotv = 0.0f32;
             for j in 0..self.dims {
-                dot += q[j] * v[j];
+                dotv += q[j] * v[j];
             }
-            results.push((i, dot));
+            results.push((i, dotv));
         }
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         results.truncate(top_k);
@@ -195,12 +316,12 @@ impl VectorIndex {
         let mut results = Vec::with_capacity(scales.len());
         for (i, scale) in scales.iter().enumerate() {
             let base = i * self.dims;
-            let mut dot = 0.0f32;
+            let mut dotv = 0.0f32;
             for j in 0..self.dims {
                 let v = vectors_i8[base + j] as f32 * *scale;
-                dot += q[j] * v;
+                dotv += q[j] * v;
             }
-            results.push((i, dot));
+            results.push((i, dotv));
         }
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         results.truncate(top_k);
@@ -272,6 +393,52 @@ impl VectorIndex {
         results.truncate(top_k);
         results
     }
+
+    fn search_pq(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
+        let pq = match &self.pq {
+            Some(pq) => pq,
+            None => return Vec::new(),
+        };
+        let q = embed_text(query, self.dims, self.ngram_min, self.ngram_max);
+        let q_tables = pq_query_tables(&q, pq);
+
+        let mut candidates: Vec<usize> = if let Some(ivf) = &self.ivf {
+            let mut centroid_scores: Vec<(usize, f32)> = ivf
+                .centroids
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (i, dot(&q, c)))
+                .collect();
+            centroid_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            centroid_scores.truncate(self.ann_nprobe.min(centroid_scores.len()));
+            let mut ids = Vec::new();
+            for (cid, _) in centroid_scores {
+                ids.extend_from_slice(&ivf.lists[cid]);
+            }
+            ids
+        } else {
+            (0..self.len()).collect()
+        };
+
+        if candidates.is_empty() {
+            candidates = (0..self.len()).collect();
+        }
+
+        let mut results = Vec::with_capacity(candidates.len());
+        for &doc_id in &candidates {
+            let mut score = 0.0f32;
+            let base = doc_id * pq.m;
+            for m in 0..pq.m {
+                let code = pq.codes[base + m] as usize;
+                score += q_tables[m][code];
+            }
+            results.push((doc_id, score));
+        }
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(top_k);
+        results
+    }
 }
 
 fn sample_vectors(
@@ -334,6 +501,70 @@ fn kmeans(samples: &[Vec<f32>], k: usize, iters: usize) -> Vec<Vec<f32>> {
         }
     }
     centroids
+}
+
+fn build_pq(samples: &[Vec<f32>], m: usize, k: usize, iters: usize, dims: usize) -> PQIndex {
+    let sub_dim = dims / m.max(1);
+    let mut codebooks = Vec::with_capacity(m);
+    for i in 0..m {
+        let mut sub_samples = Vec::with_capacity(samples.len());
+        let start = i * sub_dim;
+        let end = start + sub_dim;
+        for v in samples {
+            sub_samples.push(v[start..end].to_vec());
+        }
+        let centroids = kmeans(&sub_samples, k, iters);
+        codebooks.push(centroids);
+    }
+    PQIndex {
+        m,
+        k,
+        sub_dim,
+        codebooks,
+        codes: Vec::new(),
+    }
+}
+
+fn encode_pq(v: &[f32], pq: &PQIndex, out: &mut Vec<u8>) {
+    for m in 0..pq.m {
+        let start = m * pq.sub_dim;
+        let end = start + pq.sub_dim;
+        let sub = &v[start..end];
+        let mut best = 0usize;
+        let mut best_dist = f32::MAX;
+        for (i, c) in pq.codebooks[m].iter().enumerate() {
+            let d = l2(sub, c);
+            if d < best_dist {
+                best_dist = d;
+                best = i;
+            }
+        }
+        out.push(best as u8);
+    }
+}
+
+fn pq_query_tables(query: &[f32], pq: &PQIndex) -> Vec<Vec<f32>> {
+    let mut tables = Vec::with_capacity(pq.m);
+    for m in 0..pq.m {
+        let start = m * pq.sub_dim;
+        let end = start + pq.sub_dim;
+        let qsub = &query[start..end];
+        let mut table = Vec::with_capacity(pq.k);
+        for c in &pq.codebooks[m] {
+            table.push(dot(qsub, c));
+        }
+        tables.push(table);
+    }
+    tables
+}
+
+fn l2(a: &[f32], b: &[f32]) -> f32 {
+    let mut total = 0.0f32;
+    for i in 0..a.len() {
+        let diff = a[i] - b[i];
+        total += diff * diff;
+    }
+    total
 }
 
 fn nearest_centroid(v: &[f32], centroids: &[Vec<f32>]) -> usize {

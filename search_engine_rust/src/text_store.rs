@@ -43,6 +43,17 @@ impl TextStore {
         Ok(Self { path: path.to_path_buf(), mmap, len: cursor })
     }
 
+    pub fn open(path: &Path, use_mmap: bool) -> io::Result<Self> {
+        let len = fs::metadata(path)?.len();
+        let mmap = if use_mmap {
+            let file = File::open(path)?;
+            Some(unsafe { Mmap::map(&file)? })
+        } else {
+            None
+        };
+        Ok(Self { path: path.to_path_buf(), mmap, len })
+    }
+
     pub fn get_text(&self, offset: u64, len: u32) -> Option<String> {
         if len == 0 {
             return None;
@@ -93,5 +104,9 @@ impl TextStore {
 
     pub fn byte_len(&self) -> u64 {
         self.len
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 }

@@ -9,6 +9,7 @@ mod extraction;
 mod confidence;
 mod utils;
 mod text_store;
+mod index_store;
 mod ffi;
 mod evaluation;
 mod crawler;
@@ -32,7 +33,7 @@ pub use cli::{Command as PipelineCommand};
 
 use processing::{process_documents, Chunk};
 use bm25::BM25Index;
-use vector::{AnnConfig, VectorIndex};
+use vector::{AnnConfig, PQConfig, VectorIndex};
 use retrieval::retrieve;
 use ranking::{rank_candidates, RankingWeights, Ranked};
 use extraction::extract_answers;
@@ -75,6 +76,11 @@ pub struct Config {
     pub ann_nprobe: usize,
     pub ann_max_kmeans_iters: usize,
     pub ann_sample_size: usize,
+    pub pq_enabled: bool,
+    pub pq_m: usize,
+    pub pq_k: usize,
+    pub pq_max_kmeans_iters: usize,
+    pub pq_sample_size: usize,
     pub low_memory: bool,
     pub retrieval_top_k: usize,
     pub results_top_k: usize,
@@ -99,6 +105,11 @@ impl Default for Config {
             ann_nprobe: 4,
             ann_max_kmeans_iters: 8,
             ann_sample_size: 5000,
+            pq_enabled: false,
+            pq_m: 8,
+            pq_k: 256,
+            pq_max_kmeans_iters: 8,
+            pq_sample_size: 5000,
             low_memory: false,
             retrieval_top_k: 50,
             results_top_k: 10,
@@ -164,6 +175,13 @@ impl SearchEngine {
             max_iters: config.ann_max_kmeans_iters,
             sample_size: config.ann_sample_size,
         };
+        let pq = PQConfig {
+            enabled: config.pq_enabled,
+            m: config.pq_m,
+            k: config.pq_k,
+            max_iters: config.pq_max_kmeans_iters,
+            sample_size: config.pq_sample_size,
+        };
         let vector = VectorIndex::build(
             &chunks,
             config.vector_dims,
@@ -171,6 +189,7 @@ impl SearchEngine {
             config.vector_ngram_max,
             config.vector_quantize,
             &ann,
+            &pq,
         );
         let cache = Mutex::new(QueryCache::new(config.cache_size));
         let text_store = if let Some(path) = config.text_store_path.as_ref() {
@@ -355,6 +374,55 @@ impl SearchEngine {
         }
         String::new()
     }
+
+    pub fn save_index(&self, dir: &str) -> std::io::Result<()> {
+        let store = IndexStore::new(dir);
+        let text_store_file = if let Some(ts) = &self.text_store {
+            let path = store.copy_text_store(ts.path())?;
+            Some(path.to_string_lossy().to_string())
+        } else {
+            None
+        };
+        store.save_meta(&IndexMeta { text_store_file })?;
+        store.save_chunks(&self.chunks)?;
+        store.save_bm25(&self.bm25)?;
+        store.save_vector(&self.vector)?;
+        Ok(())
+    }
+
+    pub fn load_index(dir: &str, config: Config) -> std::io::Result<Self> {
+        let store = IndexStore::new(dir);
+        let meta = store.load_meta()?;
+        let chunk_meta = store.load_chunks()?;
+        let mut chunks: Vec<Chunk> = chunk_meta
+            .into_iter()
+            .map(|c| Chunk {
+                id: c.id,
+                text: String::new(),
+                clean: c.clean,
+                tokens: Vec::new(),
+                positions: std::collections::HashMap::new(),
+                text_offset: c.text_offset,
+                text_len: c.text_len,
+            })
+            .collect();
+        let bm25 = store.load_bm25()?;
+        let vector = store.load_vector()?;
+        let cache = Mutex::new(QueryCache::new(config.cache_size));
+
+        let text_store = match meta.text_store_file {
+            Some(path) => TextStore::open(Path::new(&path), config.text_store_mmap).ok(),
+            None => None,
+        };
+
+        if config.low_memory {
+            for chunk in &mut chunks {
+                chunk.tokens.clear();
+                chunk.positions.clear();
+            }
+        }
+        Ok(Self { chunks, bm25, vector, config, cache, text_store })
+    }
 }
 
 static ENGINE: OnceLock<Mutex<SearchEngine>> = OnceLock::new();
@@ -384,3 +452,4 @@ pub fn update_documents(docs: Vec<Document>) -> usize {
     }
     0
 }
+use index_store::{IndexMeta, IndexStore};

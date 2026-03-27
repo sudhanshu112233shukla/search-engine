@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
 use crate::processing::Chunk;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TermEntry {
     pub df: u32,
     pub postings: Vec<(usize, u32)>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BM25Index {
     pub terms: HashMap<String, TermEntry>,
     pub doc_lens: Vec<usize>,

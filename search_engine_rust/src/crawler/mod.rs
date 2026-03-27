@@ -1,9 +1,13 @@
 ﻿use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use reqwest::blocking::Client;
 use reqwest::Url;
 use scraper::{Html, Selector};
+use serde::{Deserialize, Serialize};
 
 use crate::storage::{RawPage, StorageManager};
 
@@ -13,11 +17,13 @@ pub struct CrawlConfig {
     pub max_depth: usize,
     pub timeout_ms: u64,
     pub user_agent: String,
+    pub use_disk_frontier: bool,
+    pub frontier_path: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct UrlTask {
-    url: Url,
+    url: String,
     depth: usize,
 }
 
@@ -63,6 +69,112 @@ impl RobotsCache {
     }
 }
 
+struct DiskFrontier {
+    queue_path: PathBuf,
+    seen_path: PathBuf,
+    cursor_path: PathBuf,
+    cursor: u64,
+    queue: VecDeque<UrlTask>,
+    seen: HashSet<String>,
+}
+
+impl DiskFrontier {
+    fn new(root: &Path) -> Self {
+        let queue_path = root.join("frontier.queue");
+        let seen_path = root.join("frontier.seen");
+        let cursor_path = root.join("frontier.cursor");
+        let cursor = fs::read_to_string(&cursor_path)
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+        let seen = load_seen(&seen_path);
+        Self {
+            queue_path,
+            seen_path,
+            cursor_path,
+            cursor,
+            queue: VecDeque::new(),
+            seen,
+        }
+    }
+
+    fn enqueue(&mut self, task: UrlTask) {
+        if self.seen.insert(task.url.clone()) {
+            let _ = append_jsonl(&self.queue_path, &task);
+            let _ = append_line(&self.seen_path, &task.url);
+        }
+    }
+
+    fn dequeue(&mut self) -> Option<UrlTask> {
+        if let Some(task) = self.queue.pop_front() {
+            return Some(task);
+        }
+        self.fill_queue();
+        self.queue.pop_front()
+    }
+
+    fn fill_queue(&mut self) {
+        let file = match File::open(&self.queue_path) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        let mut reader = BufReader::new(file);
+        if reader.seek(SeekFrom::Start(self.cursor)).is_err() {
+            return;
+        }
+        let mut buf = String::new();
+        let mut read_bytes = 0u64;
+        while self.queue.len() < 1000 {
+            buf.clear();
+            let bytes = match reader.read_line(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(_) => break,
+            };
+            read_bytes += bytes as u64;
+            if let Ok(task) = serde_json::from_str::<UrlTask>(buf.trim()) {
+                self.queue.push_back(task);
+            }
+        }
+        self.cursor += read_bytes;
+        let _ = fs::write(&self.cursor_path, self.cursor.to_string());
+    }
+}
+
+fn append_jsonl<T: Serialize>(path: &Path, item: &T) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new().create(true).append(true).open(path)?;
+    let mut writer = std::io::BufWriter::new(file);
+    let line = serde_json::to_string(item).unwrap_or_else(|_| "{}".to_string());
+    writer.write_all(line.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    Ok(())
+}
+
+fn append_line(path: &Path, line: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new().create(true).append(true).open(path)?;
+    let mut writer = std::io::BufWriter::new(file);
+    writer.write_all(line.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    Ok(())
+}
+
+fn load_seen(path: &Path) -> HashSet<String> {
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return HashSet::new(),
+    };
+    let reader = BufReader::new(file);
+    reader.lines().filter_map(|l| l.ok()).collect()
+}
+
 pub struct Crawler {
     client: Client,
     config: CrawlConfig,
@@ -70,6 +182,7 @@ pub struct Crawler {
     seen: HashSet<String>,
     queue: VecDeque<UrlTask>,
     robots: RobotsCache,
+    disk_frontier: Option<DiskFrontier>,
 }
 
 impl Crawler {
@@ -79,6 +192,17 @@ impl Crawler {
             .user_agent(config.user_agent.clone())
             .build()
             .expect("failed to build http client");
+        let disk_frontier = if config.use_disk_frontier {
+            let root = config
+                .frontier_path
+                .clone()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| storage.root_path().join("frontier"));
+            Some(DiskFrontier::new(&root))
+        } else {
+            None
+        };
+
         Self {
             client,
             config,
@@ -86,31 +210,50 @@ impl Crawler {
             seen: HashSet::new(),
             queue: VecDeque::new(),
             robots: RobotsCache::default(),
+            disk_frontier,
         }
     }
 
     pub fn add_seed(&mut self, url: &str) {
         if let Ok(parsed) = Url::parse(url) {
             let norm = normalize_url(&parsed);
+            if let Some(frontier) = &mut self.disk_frontier {
+                frontier.enqueue(UrlTask { url: norm, depth: 0 });
+                return;
+            }
             if self.seen.insert(norm) {
-                self.queue.push_back(UrlTask { url: parsed, depth: 0 });
+                self.queue.push_back(UrlTask { url: parsed.to_string(), depth: 0 });
             }
         }
     }
 
     pub fn crawl(&mut self) {
         let mut crawled = 0usize;
-        while let Some(task) = self.queue.pop_front() {
+        loop {
             if crawled >= self.config.crawl_limit {
                 break;
             }
+            let task = if let Some(frontier) = &mut self.disk_frontier {
+                frontier.dequeue()
+            } else {
+                self.queue.pop_front()
+            };
+            let task = match task {
+                Some(t) => t,
+                None => break,
+            };
+
             if task.depth > self.config.max_depth {
                 continue;
             }
-            if !self.robots.allowed(&self.client, &task.url) {
+            let parsed = match Url::parse(&task.url) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+            if !self.robots.allowed(&self.client, &parsed) {
                 continue;
             }
-            let resp = match self.client.get(task.url.clone()).send() {
+            let resp = match self.client.get(parsed.clone()).send() {
                 Ok(r) => r,
                 Err(_) => continue,
             };
@@ -121,11 +264,11 @@ impl Crawler {
                 Ok(t) => t,
                 Err(_) => continue,
             };
-            let (title, text, links) = parse_html(&html, &task.url);
+            let (title, text, links) = parse_html(&html, &parsed);
             if text.is_empty() {
                 continue;
             }
-            let page = RawPage::new(&task.url, &title, &text, &links);
+            let page = RawPage::new(&parsed, &title, &text, &links);
             if self.storage.write_raw(&page).is_ok() {
                 crawled += 1;
             }
@@ -133,8 +276,10 @@ impl Crawler {
             for link in links {
                 if let Ok(parsed) = Url::parse(&link) {
                     let norm = normalize_url(&parsed);
-                    if self.seen.insert(norm) {
-                        self.queue.push_back(UrlTask { url: parsed, depth: task.depth + 1 });
+                    if let Some(frontier) = &mut self.disk_frontier {
+                        frontier.enqueue(UrlTask { url: norm, depth: task.depth + 1 });
+                    } else if self.seen.insert(norm) {
+                        self.queue.push_back(UrlTask { url: parsed.to_string(), depth: task.depth + 1 });
                     }
                 }
             }

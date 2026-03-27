@@ -43,6 +43,8 @@ pub struct PipelineConfig {
     pub max_depth: usize,
     pub timeout_ms: u64,
     pub storage_path: String,
+    pub use_disk_frontier: bool,
+    pub frontier_path: Option<String>,
 }
 
 impl Default for PipelineConfig {
@@ -52,6 +54,8 @@ impl Default for PipelineConfig {
             max_depth: 3,
             timeout_ms: 5000,
             storage_path: "./data".to_string(),
+            use_disk_frontier: true,
+            frontier_path: None,
         }
     }
 }
@@ -63,6 +67,10 @@ pub struct StorageManager {
 impl StorageManager {
     pub fn new(root: impl AsRef<Path>) -> Self {
         Self { root: root.as_ref().to_path_buf() }
+    }
+
+    pub fn root_path(&self) -> &Path {
+        &self.root
     }
 
     pub fn raw_path(&self) -> PathBuf {

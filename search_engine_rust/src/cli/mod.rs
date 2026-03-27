@@ -27,6 +27,8 @@ pub fn run(cmd: Command, config: PipelineConfig) {
                 max_depth: config.max_depth,
                 timeout_ms: config.timeout_ms,
                 user_agent: "OfflineSearchCrawler/1.0".to_string(),
+                use_disk_frontier: config.use_disk_frontier,
+                frontier_path: config.frontier_path.clone(),
             };
             let mut crawler = Crawler::new(crawl_config, storage);
             crawler.add_seed(&seed);

@@ -61,6 +61,34 @@ fn main() {
         "index" => {
             pipeline::run(PipelineCommand::Index, pipeline_config);
         }
+        "build-index" => {
+            let dataset = value_after(&args, "--dataset").unwrap_or_else(|| "data/index/dataset.json".to_string());
+            let out_dir = value_after(&args, "--out").unwrap_or_else(|| "data/index_store".to_string());
+            let docs = std::fs::read_to_string(&dataset).unwrap_or_else(|_| "[]".to_string());
+            let parsed = serde_json::from_str::<Vec<Document>>(&docs).unwrap_or_default();
+            if parsed.is_empty() {
+                eprintln!("No documents loaded from dataset");
+                return;
+            }
+            let mut config = Config::default();
+            config.vector_quantize = true;
+            config.ann_enabled = true;
+            config.pq_enabled = true;
+            config.text_store_path = Some(format!("{}/textstore.bin", out_dir));
+            let engine = SearchEngine::new(parsed, config);
+            if let Err(err) = engine.save_index(&out_dir) {
+                eprintln!("Failed to save index: {err}");
+            }
+        }
+        "load-index" => {
+            let dir = value_after(&args, "--dir").unwrap_or_else(|| "data/index_store".to_string());
+            let config = Config::default();
+            let engine = SearchEngine::load_index(&dir, config);
+            match engine {
+                Ok(_) => println!("Index loaded successfully"),
+                Err(err) => eprintln!("Load failed: {err}"),
+            }
+        }
         _ => print_usage(),
     }
 }
@@ -74,5 +102,7 @@ fn print_usage() {
     eprintln!("  cargo run -- crawl --seed https://example.com --limit 1000");
     eprintln!("  cargo run -- process");
     eprintln!("  cargo run -- index");
+    eprintln!("  cargo run -- build-index --dataset data/index/dataset.json --out data/index_store");
+    eprintln!("  cargo run -- load-index --dir data/index_store");
     eprintln!("  cargo run -- eval evaluation/queries.json");
 }
