@@ -1,4 +1,4 @@
-use std::ffi::{CStr, CString};
+﻿use std::ffi::{CStr, CString};
 use std::fs;
 use std::path::PathBuf;
 use std::os::raw::c_char;
@@ -55,9 +55,19 @@ pub extern "C" fn init_engine_from_file(path: *const c_char) {
     config.pq_m = 8;
     config.pq_k = 256;
     config.low_memory = true;
-    let engine = SearchEngine::new(docs, config);
+
+    let (head, tail) = split_docs(docs);
+    let engine = SearchEngine::new(head, config);
     if !init_engine_once(engine) {
         eprintln!("[ffi] engine already initialized; skipping");
+        return;
+    }
+    if !tail.is_empty() {
+        std::thread::spawn(move || {
+            for batch in tail.chunks(500) {
+                let _ = update_documents(batch.to_vec());
+            }
+        });
     }
 }
 
@@ -76,10 +86,33 @@ pub extern "C" fn init_engine_from_json(json: *const c_char) {
     let mut config = Config::default();
     config.vector_quantize = true;
     config.ann_enabled = true;
-    let engine = SearchEngine::new(docs, config);
+    config.pq_enabled = true;
+    config.pq_m = 8;
+    config.pq_k = 256;
+    config.low_memory = true;
+
+    let (head, tail) = split_docs(docs);
+    let engine = SearchEngine::new(head, config);
     if !init_engine_once(engine) {
         eprintln!("[ffi] engine already initialized; skipping");
+        return;
     }
+    if !tail.is_empty() {
+        std::thread::spawn(move || {
+            for batch in tail.chunks(500) {
+                let _ = update_documents(batch.to_vec());
+            }
+        });
+    }
+}
+
+fn split_docs(mut docs: Vec<Document>) -> (Vec<Document>, Vec<Document>) {
+    if docs.len() <= 1000 {
+        return (docs, Vec::new());
+    }
+    let split = (docs.len() / 10).max(1000).min(docs.len());
+    let tail = docs.split_off(split);
+    (docs, tail)
 }
 
 #[no_mangle]
