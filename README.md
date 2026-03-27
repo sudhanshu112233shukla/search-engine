@@ -1,6 +1,6 @@
-# Offline Hybrid Search Engine (Rust Core + Android App)
+﻿# Offline Hybrid Search Engine (Rust Core + Android App)
 
-A production-grade, **offline-first search engine** with a Rust core and a modern Android app. It combines **BM25 keyword search**, **semantic similarity**, multi-signal ranking, exact answer extraction, and evaluation tooling�all built to run **entirely on device** without a server.
+A production-grade, **offline-first search engine** with a Rust core and a modern Android app. It combines **BM25 keyword search**, **semantic similarity**, multi-signal ranking, exact answer extraction, and evaluation tooling—all built to run **entirely on device** without a server.
 
 ---
 
@@ -28,9 +28,12 @@ Why it matters:
 - Answer extraction (top answers)
 - Snippet generation + highlighting
 - Query cache
+- IVF ANN vector search + int8 quantized vectors
+- Low-memory mode (store text on disk; recompute tokens on demand)
 - Offline dataset loading
 - Jetpack Compose UI + MVVM
 - Evaluation CLI (precision@10, recall@10, MRR)
+- Full ingestion pipeline (crawler → processor → index)
 
 ---
 
@@ -119,7 +122,35 @@ Open `android_app/` in Android Studio and run.
 
 ---
 
-## 7. Evaluation (Quality Metrics)
+## 7. Ingestion Pipeline (Crawler → Processor → Index)
+
+From `search_engine_rust/`:
+
+```bash
+cargo run -- crawl --seed https://example.com --limit 1000
+cargo run -- process
+cargo run -- index
+```
+
+Config file: `search_engine_rust/config.json`
+
+```json
+{
+  "crawl_limit": 10000,
+  "max_depth": 3,
+  "timeout_ms": 5000,
+  "storage_path": "./data"
+}
+```
+
+Outputs:
+- Raw pages: `data/raw/pages.jsonl`
+- Processed chunks: `data/processed/chunks.jsonl`
+- Dataset for engine: `data/index/dataset.json`
+
+---
+
+## 8. Evaluation (Quality Metrics)
 
 Run evaluation CLI:
 
@@ -137,27 +168,30 @@ Metrics include:
 
 ---
 
-## 8. Demo Queries
+## 9. Demo Queries
 
 See `docs/demo_queries.md` for sample queries + expected behavior.
 
 ---
 
-## 9. Performance Notes
+## 10. Performance Notes
 
 - Designed for **<200ms** search on mobile-sized datasets
 - Fully offline; no network calls
 - Memory scales with dataset size
 - Query cache reduces repeated computation
+- Low-memory mode for **100K+ docs** (text on disk + on-demand tokens)
+- Quantized vectors reduce memory ~4x
+- IVF ANN reduces vector search latency on large corpora
 
 ---
 
-## 10. Future Work
+## 11. Future Work
 
-- Larger datasets (50K+ docs)
+- Larger datasets (1M+ docs)
 - Personalization + feedback signals
 - Better embeddings (small on-device models)
-- Optional ANN acceleration
+- HNSW or PQ for higher ANN recall
 
 ---
 
