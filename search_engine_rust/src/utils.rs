@@ -32,9 +32,10 @@ pub fn normalize_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut prev_space = false;
     for c in text.chars() {
-        let lc = c.to_ascii_lowercase();
-        if lc.is_ascii_alphanumeric() {
-            out.push(lc);
+        if c.is_alphanumeric() {
+            for lc in c.to_lowercase() {
+                out.push(lc);
+            }
             prev_space = false;
         } else if !prev_space {
             out.push(' ');
@@ -52,8 +53,8 @@ pub fn tokenize(text: &str) -> Vec<String> {
     let normalized = normalize_text(text);
     normalized
         .split_whitespace()
+        .map(|s| stem_token(s))
         .filter(|t| !is_stopword(t))
-        .map(|s| s.to_string())
         .collect()
 }
 
@@ -63,15 +64,29 @@ pub fn tokenize_with_positions(text: &str) -> (Vec<String>, HashMap<String, Vec<
     let mut positions: HashMap<String, Vec<usize>> = HashMap::new();
 
     for (idx, raw) in normalized.split_whitespace().enumerate() {
-        if is_stopword(raw) {
+        let token = stem_token(raw);
+        if is_stopword(&token) {
             continue;
         }
-        let token = raw.to_string();
         tokens.push(token.clone());
         positions.entry(token).or_default().push(idx);
     }
 
     (tokens, positions)
+}
+
+fn stem_token(token: &str) -> String {
+    if !token.is_ascii() {
+        return token.to_string();
+    }
+    let mut t = token.to_string();
+    for suf in ["ing", "edly", "ed", "ly", "es", "s"] {
+        if t.len() > suf.len() + 2 && t.ends_with(suf) {
+            t.truncate(t.len() - suf.len());
+            break;
+        }
+    }
+    t
 }
 
 pub fn process_query(query: &str) -> Vec<String> {

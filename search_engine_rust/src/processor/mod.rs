@@ -1,4 +1,4 @@
-﻿use std::collections::HashSet;
+﻿use std::collections::{HashMap, HashSet};
 
 use crate::processing::ChunkingConfig;
 use crate::storage::{ProcessedChunk, RawPage, StorageManager};
@@ -28,10 +28,14 @@ impl Processor {
 
     pub fn process_all(&self) {
         let pages = self.storage.read_raw();
-        let mut seen: HashSet<String> = HashSet::new();
+        let mut exact_seen: HashSet<String> = HashSet::new();
+        let mut buckets: HashMap<u16, Vec<u64>> = HashMap::new();
         for page in pages {
             let hash = normalize_text(&page.text);
-            if !seen.insert(hash) {
+            if !exact_seen.insert(hash) {
+                continue;
+            }
+            if is_near_duplicate(&page.text, &mut buckets) {
                 continue;
             }
             let chunks = chunk_text(&page, &self.chunking);
@@ -68,4 +72,56 @@ fn chunk_text(page: &RawPage, config: &ChunkingConfig) -> Vec<ProcessedChunk> {
     }
 
     chunks
+}
+
+fn is_near_duplicate(text: &str, buckets: &mut HashMap<u16, Vec<u64>>) -> bool {
+    let sig = simhash(text);
+    let bucket = (sig >> 48) as u16;
+    if let Some(list) = buckets.get(&bucket) {
+        for &other in list {
+            if hamming(sig, other) <= 3 {
+                return true;
+            }
+        }
+    }
+    buckets.entry(bucket).or_default().push(sig);
+    false
+}
+
+fn simhash(text: &str) -> u64 {
+    let tokens = tokenize(text);
+    if tokens.is_empty() {
+        return 0;
+    }
+    let mut weights = [0i32; 64];
+    for tok in tokens {
+        let h = murmur64(&tok);
+        for i in 0..64 {
+            if (h >> i) & 1 == 1 {
+                weights[i] += 1;
+            } else {
+                weights[i] -= 1;
+            }
+        }
+    }
+    let mut out = 0u64;
+    for i in 0..64 {
+        if weights[i] > 0 {
+            out |= 1u64 << i;
+        }
+    }
+    out
+}
+
+fn murmur64(s: &str) -> u64 {
+    let mut h = 0xcbf29ce484222325u64;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+fn hamming(a: u64, b: u64) -> u32 {
+    (a ^ b).count_ones()
 }

@@ -1,6 +1,7 @@
 ﻿use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +19,11 @@ pub struct ChunkPersist {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IndexMeta {
+    pub version: u32,
     pub text_store_file: Option<String>,
+    pub doc_count: usize,
+    pub deleted_count: usize,
+    pub updated_at: u64,
 }
 
 pub struct IndexStore {
@@ -81,6 +86,15 @@ impl IndexStore {
         Ok(VectorIndex::from_persist(persist))
     }
 
+    pub fn save_deleted(&self, deleted: &[String]) -> io::Result<()> {
+        self.ensure_dirs()?;
+        write_bin(self.root.join("deleted.bin"), deleted)
+    }
+
+    pub fn load_deleted(&self) -> io::Result<Vec<String>> {
+        read_bin(self.root.join("deleted.bin"))
+    }
+
     pub fn copy_text_store(&self, src: &Path) -> io::Result<PathBuf> {
         self.ensure_dirs()?;
         let dst = self.root.join("textstore.bin");
@@ -88,6 +102,13 @@ impl IndexStore {
             fs::copy(src, &dst)?;
         }
         Ok(dst)
+    }
+
+    pub fn now_ts() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
     }
 }
 

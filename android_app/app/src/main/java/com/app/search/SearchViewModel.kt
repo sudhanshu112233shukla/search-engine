@@ -20,6 +20,7 @@ data class SearchUiState(
     val loading: Boolean = false,
     val engineLoading: Boolean = false,
     val engineReady: Boolean = false,
+    val indexingProgress: Float = 0f,
     val answer: Answer? = null,
     val answers: List<Answer> = emptyList(),
     val results: List<ResultItem> = emptyList(),
@@ -27,7 +28,10 @@ data class SearchUiState(
     val selected: ResultItem? = null,
     val showSettings: Boolean = false,
     val error: String? = null,
-    val slowQuery: Boolean = false
+    val slowQuery: Boolean = false,
+    val datasetSizeMb: String = "",
+    val textStoreSizeMb: String = "",
+    val lastInit: String = ""
 )
 
 class SearchViewModel(private val appContext: Context) : ViewModel() {
@@ -36,13 +40,38 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
 
     private val initialized = AtomicBoolean(false)
     private var searchJob: Job? = null
+    private var progressJob: Job? = null
     private var lastQuery: String = ""
     private val historyStore = SearchHistoryStore(appContext)
 
     fun initIfNeeded(datasetPath: String) {
         if (initialized.compareAndSet(false, true)) {
             val history = historyStore.load()
-            _state.update { it.copy(history = history, engineLoading = true, engineReady = false) }
+            val datasetSize = FileSize.formatMb(datasetPath)
+            val textStorePath = datasetPath.replace(Regex("\\.[^.]+") , ".textstore")
+            val textStoreSize = FileSize.formatMb(textStorePath)
+            _state.update {
+                it.copy(
+                    history = history,
+                    engineLoading = true,
+                    engineReady = false,
+                    indexingProgress = 0.05f,
+                    datasetSizeMb = datasetSize,
+                    textStoreSizeMb = textStoreSize,
+                    lastInit = TimeFormat.now()
+                )
+            }
+
+            progressJob = viewModelScope.launch {
+                while (true) {
+                    delay(200)
+                    _state.update { state ->
+                        val next = (state.indexingProgress + 0.02f).coerceAtMost(0.9f)
+                        state.copy(indexingProgress = next)
+                    }
+                }
+            }
+
             viewModelScope.launch {
                 val ok = withContext(Dispatchers.IO) {
                     runCatching {
@@ -50,10 +79,12 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                         true
                     }.getOrDefault(false)
                 }
+                progressJob?.cancel()
                 _state.update {
                     it.copy(
                         engineLoading = false,
                         engineReady = ok,
+                        indexingProgress = if (ok) 1f else it.indexingProgress,
                         error = if (!ok) "Failed to initialize search engine" else null
                     )
                 }
@@ -131,5 +162,22 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
 class SearchViewModelFactory(private val context: Context) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         return SearchViewModel(context.applicationContext) as T
+    }
+}
+
+object FileSize {
+    fun formatMb(path: String): String {
+        return runCatching {
+            val file = java.io.File(path)
+            if (!file.exists()) "0 MB" else String.format("%.2f MB", file.length() / (1024.0 * 1024.0))
+        }.getOrDefault("0 MB")
+    }
+}
+
+object TimeFormat {
+    fun now(): String {
+        val ms = System.currentTimeMillis()
+        val seconds = ms / 1000
+        return java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(java.util.Date(seconds * 1000))
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,6 +24,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -64,7 +66,7 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
     }
 
     if (state.showSettings) {
-        SettingsScreen(onBack = { viewModel.onBack() }, onClearHistory = { viewModel.clearHistory() })
+        SettingsScreen(state, onBack = { viewModel.onBack() }, onClearHistory = { viewModel.clearHistory() })
         return
     }
 
@@ -114,9 +116,9 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
         Spacer(modifier = Modifier.height(12.dp))
 
         if (state.engineLoading) {
-            IndexingBanner("Building local index…")
+            IndexingBanner("Building local index…", state.indexingProgress)
         } else if (!state.engineReady) {
-            IndexingBanner("Search engine not ready")
+            IndexingBanner("Search engine not ready", 0f)
         }
 
         if (state.query.isBlank()) {
@@ -149,17 +151,19 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
 }
 
 @Composable
-fun IndexingBanner(text: String) {
+fun IndexingBanner(text: String, progress: Float) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
     ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(12.dp),
-            style = MaterialTheme.typography.bodySmall
-        )
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(text, style = MaterialTheme.typography.bodySmall)
+            if (progress > 0f) {
+                Spacer(modifier = Modifier.height(6.dp))
+                LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+            }
+        }
     }
     Spacer(modifier = Modifier.height(8.dp))
 }
@@ -286,12 +290,17 @@ fun DetailScreen(item: ResultItem?, onBack: () -> Unit, query: String) {
 }
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onClearHistory: () -> Unit) {
+fun SettingsScreen(state: SearchUiState, onBack: () -> Unit, onClearHistory: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Back", modifier = Modifier.clickable { onBack() })
         Spacer(modifier = Modifier.height(12.dp))
         Text("Settings", style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(12.dp))
         Text("Clear search history", modifier = Modifier.clickable { onClearHistory() })
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("Index health", style = MaterialTheme.typography.titleSmall)
+        Text("Dataset size: ${state.datasetSizeMb}")
+        Text("Text store size: ${state.textStoreSizeMb}")
+        Text("Last init: ${state.lastInit}")
     }
 }

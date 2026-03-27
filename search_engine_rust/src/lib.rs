@@ -17,7 +17,7 @@ mod processor;
 mod storage;
 mod cli;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
@@ -40,6 +40,7 @@ use extraction::extract_answers;
 use confidence::compute_confidence;
 use utils::{make_snippet, normalize_text, process_query, tokenize};
 use text_store::TextStore;
+use index_store::{IndexMeta, IndexStore};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SearchResponse {
@@ -162,6 +163,7 @@ pub struct SearchEngine {
     config: Config,
     cache: Mutex<QueryCache>,
     text_store: Option<TextStore>,
+    deleted: HashSet<String>,
 }
 
 impl SearchEngine {
@@ -211,7 +213,7 @@ impl SearchEngine {
                 chunk.positions.clear();
             }
         }
-        Self { chunks, bm25, vector, config, cache, text_store }
+        Self { chunks, bm25, vector, config, cache, text_store, deleted: HashSet::new() }
     }
 
     pub fn search(&self, query: &str) -> SearchResponse {
@@ -254,6 +256,17 @@ impl SearchEngine {
             &clean_query,
             &self.config.ranking_weights,
         );
+
+        let ranked: Vec<Ranked> = ranked
+            .into_iter()
+            .filter(|r| {
+                if let Some(chunk) = self.chunks.get(r.doc_id) {
+                    !self.deleted.contains(&chunk.id)
+                } else {
+                    false
+                }
+            })
+            .collect();
 
         let mut results = Vec::new();
         for r in ranked.iter().take(self.config.results_top_k) {
@@ -361,6 +374,31 @@ impl SearchEngine {
         added
     }
 
+    pub fn delete_documents(&mut self, ids: &[String]) -> usize {
+        let mut count = 0usize;
+        for id in ids {
+            if self.deleted.insert(id.clone()) {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    pub fn live_documents(&self) -> Vec<Document> {
+        let mut docs = Vec::new();
+        for (idx, chunk) in self.chunks.iter().enumerate() {
+            if self.deleted.contains(&chunk.id) {
+                continue;
+            }
+            let text = self.chunk_text(idx);
+            if text.is_empty() {
+                continue;
+            }
+            docs.push(Document { id: chunk.id.clone(), text });
+        }
+        docs
+    }
+
     fn chunk_text(&self, idx: usize) -> String {
         if let Some(chunk) = self.chunks.get(idx) {
             if !chunk.text.is_empty() {
@@ -375,6 +413,15 @@ impl SearchEngine {
         String::new()
     }
 
+    pub fn chunk_text_by_id(&self, id: &str) -> String {
+        for (idx, chunk) in self.chunks.iter().enumerate() {
+            if chunk.id == id {
+                return self.chunk_text(idx);
+            }
+        }
+        String::new()
+    }
+
     pub fn save_index(&self, dir: &str) -> std::io::Result<()> {
         let store = IndexStore::new(dir);
         let text_store_file = if let Some(ts) = &self.text_store {
@@ -383,10 +430,17 @@ impl SearchEngine {
         } else {
             None
         };
-        store.save_meta(&IndexMeta { text_store_file })?;
+        store.save_meta(&IndexMeta {
+            version: 1,
+            text_store_file,
+            doc_count: self.chunks.len(),
+            deleted_count: self.deleted.len(),
+            updated_at: IndexStore::now_ts(),
+        })?;
         store.save_chunks(&self.chunks)?;
         store.save_bm25(&self.bm25)?;
         store.save_vector(&self.vector)?;
+        store.save_deleted(&self.deleted.iter().cloned().collect::<Vec<_>>())?;
         Ok(())
     }
 
@@ -409,6 +463,7 @@ impl SearchEngine {
         let bm25 = store.load_bm25()?;
         let vector = store.load_vector()?;
         let cache = Mutex::new(QueryCache::new(config.cache_size));
+        let deleted = store.load_deleted().unwrap_or_default().into_iter().collect();
 
         let text_store = match meta.text_store_file {
             Some(path) => TextStore::open(Path::new(&path), config.text_store_mmap).ok(),
@@ -421,7 +476,7 @@ impl SearchEngine {
                 chunk.positions.clear();
             }
         }
-        Ok(Self { chunks, bm25, vector, config, cache, text_store })
+        Ok(Self { chunks, bm25, vector, config, cache, text_store, deleted })
     }
 }
 
@@ -452,4 +507,12 @@ pub fn update_documents(docs: Vec<Document>) -> usize {
     }
     0
 }
-use index_store::{IndexMeta, IndexStore};
+
+pub fn delete_documents(ids: Vec<String>) -> usize {
+    if let Some(engine) = ENGINE.get() {
+        if let Ok(mut engine) = engine.lock() {
+            return engine.delete_documents(&ids);
+        }
+    }
+    0
+}

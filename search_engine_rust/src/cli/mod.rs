@@ -3,12 +3,18 @@
 use crate::crawler::{CrawlConfig, Crawler};
 use crate::processor::{ProcessConfig, Processor};
 use crate::storage::{PipelineConfig, StorageManager};
+use crate::{Config, Document, SearchEngine};
 
 #[derive(Debug)]
 pub enum Command {
     Crawl { seed: String, limit: Option<usize> },
     Process,
     Index,
+    BuildIndex { dataset: String, out: String },
+    LoadIndex { dir: String },
+    MergeIndex { dir: String, update: String },
+    Delete { dir: String, ids: Vec<String> },
+    Compact { dir: String, out: String },
 }
 
 pub fn load_config(path: &str) -> PipelineConfig {
@@ -45,6 +51,85 @@ pub fn run(cmd: Command, config: PipelineConfig) {
             let chunks = storage.read_processed();
             if let Err(err) = storage.write_dataset(&chunks) {
                 eprintln!("index write failed: {err}");
+            }
+        }
+        Command::BuildIndex { dataset, out } => {
+            let docs = std::fs::read_to_string(&dataset).unwrap_or_else(|_| "[]".to_string());
+            let parsed = serde_json::from_str::<Vec<Document>>(&docs).unwrap_or_default();
+            if parsed.is_empty() {
+                eprintln!("No documents loaded from dataset");
+                return;
+            }
+            let mut cfg = Config::default();
+            cfg.vector_quantize = true;
+            cfg.ann_enabled = true;
+            cfg.pq_enabled = true;
+            cfg.text_store_path = Some(format!("{}/textstore.bin", out));
+            cfg.low_memory = true;
+            let engine = SearchEngine::new(parsed, cfg);
+            if let Err(err) = engine.save_index(&out) {
+                eprintln!("Failed to save index: {err}");
+            }
+        }
+        Command::LoadIndex { dir } => {
+            let cfg = Config::default();
+            let engine = SearchEngine::load_index(&dir, cfg);
+            match engine {
+                Ok(_) => println!("Index loaded successfully"),
+                Err(err) => eprintln!("Load failed: {err}"),
+            }
+        }
+        Command::MergeIndex { dir, update } => {
+            let cfg = Config::default();
+            let mut engine = match SearchEngine::load_index(&dir, cfg) {
+                Ok(e) => e,
+                Err(err) => {
+                    eprintln!("Load failed: {err}");
+                    return;
+                }
+            };
+            let docs = std::fs::read_to_string(&update).unwrap_or_else(|_| "[]".to_string());
+            let parsed = serde_json::from_str::<Vec<Document>>(&docs).unwrap_or_default();
+            let added = engine.update_documents(parsed);
+            println!("Added {added} chunks");
+            if let Err(err) = engine.save_index(&dir) {
+                eprintln!("Save failed: {err}");
+            }
+        }
+        Command::Delete { dir, ids } => {
+            let cfg = Config::default();
+            let mut engine = match SearchEngine::load_index(&dir, cfg) {
+                Ok(e) => e,
+                Err(err) => {
+                    eprintln!("Load failed: {err}");
+                    return;
+                }
+            };
+            let removed = engine.delete_documents(&ids);
+            println!("Marked {removed} docs as deleted");
+            if let Err(err) = engine.save_index(&dir) {
+                eprintln!("Save failed: {err}");
+            }
+        }
+        Command::Compact { dir, out } => {
+            let cfg = Config::default();
+            let engine = match SearchEngine::load_index(&dir, cfg) {
+                Ok(e) => e,
+                Err(err) => {
+                    eprintln!("Load failed: {err}");
+                    return;
+                }
+            };
+            let docs = engine.live_documents();
+            let mut cfg = Config::default();
+            cfg.vector_quantize = true;
+            cfg.ann_enabled = true;
+            cfg.pq_enabled = true;
+            cfg.text_store_path = Some(format!("{}/textstore.bin", out));
+            cfg.low_memory = true;
+            let new_engine = SearchEngine::new(docs, cfg);
+            if let Err(err) = new_engine.save_index(&out) {
+                eprintln!("Compact save failed: {err}");
             }
         }
     }
