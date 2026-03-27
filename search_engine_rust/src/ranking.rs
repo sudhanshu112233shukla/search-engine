@@ -1,5 +1,5 @@
 use crate::processing::Chunk;
-use crate::utils::normalize_text;
+use crate::utils::{normalize_text, tokenize, tokenize_with_positions};
 
 #[derive(Clone, Debug)]
 pub struct Ranked {
@@ -84,13 +84,26 @@ fn proximity_score(chunk: &Chunk, query_tokens: &[String]) -> f32 {
         return 0.0;
     }
     let mut points: Vec<(usize, usize)> = Vec::new();
-    for (ti, term) in query_tokens.iter().enumerate() {
-        if let Some(pos) = chunk.positions.get(term) {
-            for p in pos {
-                points.push((*p, ti));
+    if chunk.positions.is_empty() {
+        let (_, positions) = tokenize_with_positions(&chunk.clean);
+        for (ti, term) in query_tokens.iter().enumerate() {
+            if let Some(pos) = positions.get(term) {
+                for p in pos {
+                    points.push((*p, ti));
+                }
+            } else {
+                return 0.0;
             }
-        } else {
-            return 0.0;
+        }
+    } else {
+        for (ti, term) in query_tokens.iter().enumerate() {
+            if let Some(pos) = chunk.positions.get(term) {
+                for p in pos {
+                    points.push((*p, ti));
+                }
+            } else {
+                return 0.0;
+            }
         }
     }
     points.sort_by_key(|p| p.0);
@@ -148,7 +161,12 @@ pub fn rank_candidates(
         if doc_id >= chunks.len() { continue; }
         let chunk = &chunks[doc_id];
         let exact = exact_match(&chunk.clean, clean_query);
-        let phrase = phrase_match(&chunk.tokens, query_tokens);
+        let token_view = if chunk.tokens.is_empty() {
+            tokenize(&chunk.clean)
+        } else {
+            chunk.tokens.clone()
+        };
+        let phrase = phrase_match(&token_view, query_tokens);
         let proximity = proximity_score(chunk, query_tokens);
 
         let bm25_c = weights.bm25 * bm25_norm.get(&doc_id).copied().unwrap_or(0.0);

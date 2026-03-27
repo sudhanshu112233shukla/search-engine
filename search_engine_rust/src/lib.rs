@@ -75,6 +75,7 @@ pub struct Config {
     pub ann_nprobe: usize,
     pub ann_max_kmeans_iters: usize,
     pub ann_sample_size: usize,
+    pub low_memory: bool,
     pub retrieval_top_k: usize,
     pub results_top_k: usize,
     pub ranking_weights: RankingWeights,
@@ -98,6 +99,7 @@ impl Default for Config {
             ann_nprobe: 4,
             ann_max_kmeans_iters: 8,
             ann_sample_size: 5000,
+            low_memory: false,
             retrieval_top_k: 50,
             results_top_k: 10,
             ranking_weights: RankingWeights::default(),
@@ -183,6 +185,13 @@ impl SearchEngine {
         } else {
             None
         };
+
+        if config.low_memory {
+            for chunk in &mut chunks {
+                chunk.tokens.clear();
+                chunk.positions.clear();
+            }
+        }
         Self { chunks, bm25, vector, config, cache, text_store }
     }
 
