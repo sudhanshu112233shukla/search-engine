@@ -106,6 +106,29 @@ pub extern "C" fn init_engine_from_json(json: *const c_char) {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn init_engine_from_index(dir: *const c_char) {
+    if dir.is_null() {
+        eprintln!("[ffi] init_engine_from_index: null dir");
+        return;
+    }
+    let cstr = unsafe { CStr::from_ptr(dir) };
+    let dir_str = cstr.to_string_lossy();
+    let mut config = Config::default();
+    config.low_memory = true;
+    config.text_store_mmap = true;
+    match SearchEngine::load_index(dir_str.as_ref(), config) {
+        Ok(engine) => {
+            if !init_engine_once(engine) {
+                eprintln!("[ffi] engine already initialized; skipping");
+            }
+        }
+        Err(err) => {
+            eprintln!("[ffi] load index failed: {err}");
+        }
+    }
+}
+
 fn split_docs(mut docs: Vec<Document>) -> (Vec<Document>, Vec<Document>) {
     if docs.len() <= 1000 {
         return (docs, Vec::new());
@@ -184,7 +207,7 @@ pub extern "C" fn free_string(ptr: *mut c_char) {
 
 #[cfg(target_os = "android")]
 mod jni_bridge {
-    use super::{init_engine_from_file, search_query, free_string};
+    use super::{init_engine_from_file, init_engine_from_index, search_query, free_string};
     use jni::objects::{JClass, JString};
     use jni::sys::jstring;
     use jni::JNIEnv;
@@ -202,6 +225,21 @@ mod jni_bridge {
         };
         if let Ok(c_path) = CString::new(path_str) {
             init_engine_from_file(c_path.as_ptr());
+        }
+    }
+
+    #[no_mangle]
+    pub extern "system" fn Java_com_app_search_NativeSearchEngine_initIndex(
+        env: JNIEnv,
+        _class: JClass,
+        path: JString,
+    ) {
+        let path_str = match env.get_string(&path) {
+            Ok(s) => s.into(),
+            Err(_) => "".to_string(),
+        };
+        if let Ok(c_path) = CString::new(path_str) {
+            init_engine_from_index(c_path.as_ptr());
         }
     }
 

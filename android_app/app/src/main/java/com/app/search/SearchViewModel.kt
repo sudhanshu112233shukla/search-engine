@@ -31,7 +31,9 @@ data class SearchUiState(
     val slowQuery: Boolean = false,
     val datasetSizeMb: String = "",
     val textStoreSizeMb: String = "",
-    val lastInit: String = ""
+    val lastInit: String = "",
+    val bundleProfile: String = "default",
+    val bundleAvailable: Boolean = false
 )
 
 class SearchViewModel(private val appContext: Context) : ViewModel() {
@@ -43,12 +45,16 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
     private var progressJob: Job? = null
     private var lastQuery: String = ""
     private val historyStore = SearchHistoryStore(appContext)
+    private val bundlePrefs = BundlePrefs(appContext)
 
     fun initIfNeeded(datasetPath: String) {
         if (initialized.compareAndSet(false, true)) {
             val history = historyStore.load()
+            val profile = bundlePrefs.getProfile()
+            val bundleManifest = BundleManager.loadManifest(appContext)
+            val bundleAvailable = bundleManifest != null
             val datasetSize = FileSize.formatMb(datasetPath)
-            val textStorePath = datasetPath.replace(Regex("\\.[^.]+") , ".textstore")
+            val textStorePath = datasetPath.replace(Regex("\\.[^.]+"), ".textstore")
             val textStoreSize = FileSize.formatMb(textStorePath)
             _state.update {
                 it.copy(
@@ -58,7 +64,9 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                     indexingProgress = 0.05f,
                     datasetSizeMb = datasetSize,
                     textStoreSizeMb = textStoreSize,
-                    lastInit = TimeFormat.now()
+                    lastInit = TimeFormat.now(),
+                    bundleProfile = profile,
+                    bundleAvailable = bundleAvailable
                 )
             }
 
@@ -75,7 +83,12 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
             viewModelScope.launch {
                 val ok = withContext(Dispatchers.IO) {
                     runCatching {
-                        NativeSearchEngine.init(datasetPath)
+                        val packDir = DatasetLoader.prepareIndexPack(appContext, profile)
+                        if (packDir != null) {
+                            NativeSearchEngine.initIndex(packDir)
+                        } else {
+                            NativeSearchEngine.init(datasetPath)
+                        }
                         true
                     }.getOrDefault(false)
                 }
@@ -156,6 +169,11 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
     fun clearHistory() {
         historyStore.clear()
         _state.update { it.copy(history = emptyList()) }
+    }
+
+    fun setProfile(profile: String) {
+        bundlePrefs.setProfile(profile)
+        _state.update { it.copy(bundleProfile = profile) }
     }
 }
 

@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -66,7 +65,7 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
     }
 
     if (state.showSettings) {
-        SettingsScreen(state, onBack = { viewModel.onBack() }, onClearHistory = { viewModel.clearHistory() })
+        SettingsScreen(state, onBack = { viewModel.onBack() }, onClearHistory = { viewModel.clearHistory() }, onProfile = { viewModel.setProfile(it) })
         return
     }
 
@@ -290,7 +289,12 @@ fun DetailScreen(item: ResultItem?, onBack: () -> Unit, query: String) {
 }
 
 @Composable
-fun SettingsScreen(state: SearchUiState, onBack: () -> Unit, onClearHistory: () -> Unit) {
+fun SettingsScreen(
+    state: SearchUiState,
+    onBack: () -> Unit,
+    onClearHistory: () -> Unit,
+    onProfile: (String) -> Unit
+) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Back", modifier = Modifier.clickable { onBack() })
         Spacer(modifier = Modifier.height(12.dp))
@@ -298,9 +302,27 @@ fun SettingsScreen(state: SearchUiState, onBack: () -> Unit, onClearHistory: () 
         Spacer(modifier = Modifier.height(12.dp))
         Text("Clear search history", modifier = Modifier.clickable { onClearHistory() })
         Spacer(modifier = Modifier.height(16.dp))
+        Text("Offline bundle", style = MaterialTheme.typography.titleSmall)
+        if (state.bundleAvailable) {
+            Text("Current: ${state.bundleProfile}")
+            Spacer(modifier = Modifier.height(8.dp))
+            RowItem("default (1GB)") { onProfile("default") }
+            RowItem("power (5GB)") { onProfile("power") }
+        } else {
+            Text("No bundle manifest found in assets")
+        }
+        Spacer(modifier = Modifier.height(16.dp))
         Text("Index health", style = MaterialTheme.typography.titleSmall)
         Text("Dataset size: ${state.datasetSizeMb}")
         Text("Text store size: ${state.textStoreSizeMb}")
         Text("Last init: ${state.lastInit}")
     }
+}
+
+@Composable
+fun RowItem(text: String, onClick: () -> Unit) {
+    Text(text, modifier = Modifier
+        .fillMaxWidth()
+        .clickable { onClick() }
+        .padding(vertical = 6.dp))
 }

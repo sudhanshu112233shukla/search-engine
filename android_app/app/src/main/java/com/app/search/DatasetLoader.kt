@@ -1,4 +1,4 @@
-package com.app.search
+﻿package com.app.search
 
 import android.content.Context
 import java.io.File
@@ -16,5 +16,42 @@ object DatasetLoader {
             }
         }
         return outFile.absolutePath
+    }
+
+    fun prepareIndexPack(context: Context, profile: String): String? {
+        val manifest = BundleManager.loadManifest(context) ?: return null
+        val shards = BundleManager.selectShards(manifest, profile)
+        if (shards.isEmpty()) return null
+
+        val packRoot = File(context.filesDir, "packs/$profile")
+        if (packRoot.exists() && packRoot.listFiles()?.isNotEmpty() == true) {
+            return packRoot.absolutePath
+        }
+        packRoot.mkdirs()
+
+        for (shard in shards) {
+            val shardRoot = File(packRoot, shard.name)
+            copyAssetDir(context, shard.path, shardRoot)
+        }
+        return packRoot.absolutePath
+    }
+
+    private fun copyAssetDir(context: Context, assetPath: String, outDir: File) {
+        val files = context.assets.list(assetPath) ?: return
+        if (files.isEmpty()) {
+            outDir.parentFile?.mkdirs()
+            context.assets.open(assetPath).use { input ->
+                outDir.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            return
+        }
+        outDir.mkdirs()
+        for (name in files) {
+            val childAsset = if (assetPath.isEmpty()) name else "$assetPath/$name"
+            val childFile = File(outDir, name)
+            copyAssetDir(context, childAsset, childFile)
+        }
     }
 }
