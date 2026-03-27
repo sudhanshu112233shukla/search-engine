@@ -10,6 +10,7 @@ mod confidence;
 mod utils;
 mod text_store;
 mod index_store;
+mod bundle;
 mod ffi;
 mod evaluation;
 mod crawler;
@@ -30,6 +31,7 @@ pub use crawler::{Crawler, CrawlConfig};
 pub use processor::{Processor, ProcessConfig};
 pub use storage::{StorageManager, PipelineConfig, RawPage, ProcessedChunk};
 pub use cli::{Command as PipelineCommand};
+pub use bundle::{BundleManifest, BundleProfile, ShardInfo};
 
 use processing::{process_documents, Chunk};
 use bm25::BM25Index;
