@@ -29,7 +29,13 @@ Why it matters:
 - Snippet generation + highlighting
 - Query cache
 - IVF ANN vector search + int8 quantized vectors
+- PQ (Product Quantization) for large-scale ANN
+- Persistent on-disk index (save/load)
+- Disk-based URL frontier (crawler scale)
 - Low-memory mode (store text on disk; recompute tokens on demand)
+- Incremental index maintenance (merge, delete, compact)
+- Deduplication (exact + near-duplicate simhash)
+- Unicode-aware tokenization + light stemming
 - Offline dataset loading
 - Jetpack Compose UI + MVVM
 - Evaluation CLI (precision@10, recall@10, MRR)
@@ -49,6 +55,7 @@ Rust FFI (JNI)
 Search Engine Core
   +- BM25
   +- Vector Similarity
+  +- ANN (IVF + PQ)
   +- Multi-Signal Ranking
   +- Answer Extraction
   +- Snippet Generation
@@ -139,7 +146,9 @@ Config file: `search_engine_rust/config.json`
   "crawl_limit": 10000,
   "max_depth": 3,
   "timeout_ms": 5000,
-  "storage_path": "./data"
+  "storage_path": "./data",
+  "use_disk_frontier": true,
+  "frontier_path": null
 }
 ```
 
@@ -150,7 +159,41 @@ Outputs:
 
 ---
 
-## 8. Evaluation (Quality Metrics)
+## 8. Persistent Index (Save/Load)
+
+Build on-disk index:
+
+```bash
+cargo run -- build-index --dataset data/index/dataset.json --out data/index_store
+```
+
+Load index:
+
+```bash
+cargo run -- load-index --dir data/index_store
+```
+
+Merge updates:
+
+```bash
+cargo run -- merge-index --dir data/index_store --update data/index/dataset.json
+```
+
+Delete by id:
+
+```bash
+cargo run -- delete --dir data/index_store doc:<id> doc:<id>
+```
+
+Compact index (remove deleted docs):
+
+```bash
+cargo run -- compact --dir data/index_store --out data/index_store_compact
+```
+
+---
+
+## 9. Evaluation (Quality Metrics)
 
 Run evaluation CLI:
 
@@ -168,13 +211,13 @@ Metrics include:
 
 ---
 
-## 9. Demo Queries
+## 10. Demo Queries
 
 See `docs/demo_queries.md` for sample queries + expected behavior.
 
 ---
 
-## 10. Performance Notes
+## 11. Performance Notes
 
 - Designed for **<200ms** search on mobile-sized datasets
 - Fully offline; no network calls
@@ -182,16 +225,17 @@ See `docs/demo_queries.md` for sample queries + expected behavior.
 - Query cache reduces repeated computation
 - Low-memory mode for **100K+ docs** (text on disk + on-demand tokens)
 - Quantized vectors reduce memory ~4x
-- IVF ANN reduces vector search latency on large corpora
+- IVF + PQ reduces vector search latency on large corpora
+- Partial indexing allows search to start before full build completes
 
 ---
 
-## 11. Future Work
+## 12. Future Work
 
 - Larger datasets (1M+ docs)
 - Personalization + feedback signals
-- Better embeddings (small on-device models)
-- HNSW or PQ for higher ANN recall
+- Better multilingual stemming
+- HNSW for higher ANN recall
 
 ---
 
