@@ -11,6 +11,10 @@ mod utils;
 mod text_store;
 mod ffi;
 mod evaluation;
+mod crawler;
+mod processor;
+mod storage;
+mod cli;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
@@ -21,6 +25,10 @@ use serde::Serialize;
 pub use ingestion::{Document, load_text_dir, load_text_file};
 pub use processing::ChunkingConfig;
 pub use evaluation::{EvalDataset, EvalQuery, EvalReport};
+pub use crawler::{Crawler, CrawlConfig};
+pub use processor::{Processor, ProcessConfig};
+pub use storage::{StorageManager, PipelineConfig, RawPage, ProcessedChunk};
+pub use cli::{Command as PipelineCommand};
 
 use processing::{process_documents, Chunk};
 use bm25::BM25Index;
