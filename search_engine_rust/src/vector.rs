@@ -1,6 +1,7 @@
 use crate::embedding::embed_text;
 use crate::processing::Chunk;
 use hnsw_rs::prelude::*;
+use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -45,6 +46,10 @@ pub struct VectorPersist {
     pub vectors_f32: Option<Vec<Vec<f32>>>,
     pub vectors_i8: Option<Vec<i8>>,
     pub scales: Option<Vec<f32>>,
+    #[serde(default)]
+    pub vectors_i8_file: Option<String>,
+    #[serde(default)]
+    pub scales_file: Option<String>,
     pub ivf: Option<IVFIndex>,
     pub ann_nprobe: usize,
     pub pq: Option<PQIndex>,
@@ -66,12 +71,36 @@ pub struct VectorIndex {
     pub ngram_max: usize,
     pub quantized: bool,
     pub vectors_f32: Option<Vec<Vec<f32>>>,
-    pub vectors_i8: Option<Vec<i8>>,
+    pub vectors_i8: Option<VectorI8Store>,
     pub scales: Option<Vec<f32>>,
     ivf: Option<IVFIndex>,
     ann_nprobe: usize,
     pq: Option<PQIndex>,
     hnsw: Option<HnswIndex>,
+}
+
+#[derive(Debug)]
+pub enum VectorI8Store {
+    Mem(Vec<i8>),
+    Mmap { mmap: Mmap, len: usize },
+}
+
+impl VectorI8Store {
+    pub fn as_slice(&self) -> &[i8] {
+        match self {
+            VectorI8Store::Mem(v) => v.as_slice(),
+            VectorI8Store::Mmap { mmap, len } => unsafe {
+                std::slice::from_raw_parts(mmap.as_ptr() as *const i8, *len)
+            },
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            VectorI8Store::Mem(v) => v.len(),
+            VectorI8Store::Mmap { len, .. } => *len,
+        }
+    }
 }
 
 impl VectorIndex {
@@ -177,7 +206,7 @@ impl VectorIndex {
                 ngram_max,
                 quantized: true,
                 vectors_f32: None,
-                vectors_i8: Some(vectors_i8),
+                vectors_i8: Some(VectorI8Store::Mem(vectors_i8)),
                 scales: Some(scales),
                 ivf,
                 ann_nprobe: ann.nprobe.max(1),
@@ -253,7 +282,14 @@ impl VectorIndex {
             if self.quantized {
                 let (q, scale) = quantize_vec(&v);
                 if let Some(store) = &mut self.vectors_i8 {
-                    store.extend_from_slice(&q);
+                    match store {
+                        VectorI8Store::Mem(buf) => buf.extend_from_slice(&q),
+                        VectorI8Store::Mmap { .. } => {
+                            let mut buf = store.as_slice().to_vec();
+                            buf.extend_from_slice(&q);
+                            *store = VectorI8Store::Mem(buf);
+                        }
+                    }
                 }
                 if let Some(scales) = &mut self.scales {
                     scales.push(scale);
@@ -307,23 +343,37 @@ impl VectorIndex {
             ngram_max: self.ngram_max,
             quantized: self.quantized,
             vectors_f32: self.vectors_f32.clone(),
-            vectors_i8: self.vectors_i8.clone(),
+            vectors_i8: self
+                .vectors_i8
+                .as_ref()
+                .and_then(|v| match v {
+                    VectorI8Store::Mem(buf) => Some(buf.clone()),
+                    VectorI8Store::Mmap { .. } => None,
+                }),
             scales: self.scales.clone(),
+            vectors_i8_file: None,
+            scales_file: None,
             ivf: self.ivf.clone(),
             ann_nprobe: self.ann_nprobe,
             pq: self.pq.clone(),
         }
     }
 
-    pub fn from_persist(persist: VectorPersist) -> Self {
+    pub fn from_persist(
+        persist: VectorPersist,
+        vectors_i8: Option<VectorI8Store>,
+        scales: Option<Vec<f32>>,
+    ) -> Self {
+        let vectors_i8 = vectors_i8.or_else(|| persist.vectors_i8.map(VectorI8Store::Mem));
+        let scales = scales.or(persist.scales);
         Self {
             dims: persist.dims,
             ngram_min: persist.ngram_min,
             ngram_max: persist.ngram_max,
             quantized: persist.quantized,
             vectors_f32: persist.vectors_f32,
-            vectors_i8: persist.vectors_i8,
-            scales: persist.scales,
+            vectors_i8,
+            scales,
             ivf: persist.ivf,
             ann_nprobe: persist.ann_nprobe.max(1),
             pq: persist.pq,
@@ -368,7 +418,7 @@ impl VectorIndex {
 
     fn search_quantized(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
         let vectors_i8 = match &self.vectors_i8 {
-            Some(v) if !v.is_empty() => v,
+            Some(v) if v.len() > 0 => v,
             _ => return Vec::new(),
         };
         let scales = match &self.scales {
@@ -382,7 +432,7 @@ impl VectorIndex {
             let base = i * self.dims;
             let mut dotv = 0.0f32;
             for j in 0..self.dims {
-                let v = vectors_i8[base + j] as f32 * *scale;
+                let v = vectors_i8.as_slice()[base + j] as f32 * *scale;
                 dotv += q[j] * v;
             }
             results.push((i, dotv));
@@ -441,7 +491,7 @@ impl VectorIndex {
                 let mut dotv = 0.0f32;
                 let scale = scales[i];
                 for j in 0..self.dims {
-                    let v = vectors_i8[base + j] as f32 * scale;
+                    let v = vectors_i8.as_slice()[base + j] as f32 * scale;
                     dotv += q[j] * v;
                 }
                 results.push((i, dotv));

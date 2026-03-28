@@ -1,13 +1,14 @@
-﻿use std::fs;
+use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 
 use crate::bm25::BM25Index;
 use crate::processing::Chunk;
-use crate::vector::VectorIndex;
+use crate::vector::{VectorI8Store, VectorIndex, VectorPersist};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkPersist {
@@ -77,13 +78,45 @@ impl IndexStore {
 
     pub fn save_vector(&self, vector: &VectorIndex) -> io::Result<()> {
         self.ensure_dirs()?;
-        let persist = vector.to_persist();
+        let mut persist = vector.to_persist();
+        if vector.quantized {
+            if let (Some(vectors), Some(scales)) = (vector.vectors_i8.as_ref(), vector.scales.as_ref()) {
+                write_raw(self.root.join("vectors_i8.bin"), vectors.as_slice())?;
+                write_bin(self.root.join("scales.bin"), scales)?;
+                persist.vectors_i8 = None;
+                persist.scales = None;
+                persist.vectors_i8_file = Some("vectors_i8.bin".to_string());
+                persist.scales_file = Some("scales.bin".to_string());
+            }
+        }
         write_bin(self.root.join("vector.bin"), &persist)
     }
 
-    pub fn load_vector(&self) -> io::Result<VectorIndex> {
-        let persist = read_bin(self.root.join("vector.bin"))?;
-        Ok(VectorIndex::from_persist(persist))
+    pub fn load_vector(&self, use_mmap: bool) -> io::Result<VectorIndex> {
+        let persist: VectorPersist = read_bin(self.root.join("vector.bin"))?;
+        let mut vectors_i8: Option<VectorI8Store> = None;
+        let mut scales: Option<Vec<f32>> = persist.scales.clone();
+
+        if let Some(v) = persist.vectors_i8.clone() {
+            vectors_i8 = Some(VectorI8Store::Mem(v));
+        } else if let Some(file) = &persist.vectors_i8_file {
+            let vec_path = self.root.join(file);
+            let data_len = fs::metadata(&vec_path)?.len() as usize;
+            if use_mmap {
+                let file = fs::File::open(&vec_path)?;
+                let mmap = unsafe { Mmap::map(&file)? };
+                vectors_i8 = Some(VectorI8Store::Mmap { mmap, len: data_len });
+            } else {
+                let raw = read_raw(&vec_path)?;
+                let vec_i8: Vec<i8> = raw.into_iter().map(|b| b as i8).collect();
+                vectors_i8 = Some(VectorI8Store::Mem(vec_i8));
+            }
+            if let Some(scale_file) = &persist.scales_file {
+                scales = Some(read_bin(self.root.join(scale_file))?);
+            }
+        }
+
+        Ok(VectorIndex::from_persist(persist, vectors_i8, scales))
     }
 
     pub fn save_deleted(&self, deleted: &[String]) -> io::Result<()> {
@@ -125,4 +158,18 @@ fn read_bin<P: AsRef<Path>, T: for<'de> Deserialize<'de>>(path: P) -> io::Result
     file.read_to_end(&mut buf)?;
     let data = bincode::deserialize(&buf).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     Ok(data)
+}
+
+fn write_raw<P: AsRef<Path>>(path: P, data: &[i8]) -> io::Result<()> {
+    let mut file = fs::File::create(path)?;
+    let bytes: &[u8] = unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len()) };
+    file.write_all(bytes)?;
+    Ok(())
+}
+
+fn read_raw<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
+    let mut file = fs::File::open(path)?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+    Ok(buf)
 }

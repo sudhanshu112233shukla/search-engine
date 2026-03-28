@@ -3,8 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::os::raw::c_char;
 
-use crate::{Config, Document, SearchEngine};
-use crate::{init_engine_once, search, update_documents};
+use crate::{Config, Document};
+use crate::{init_engine_instance_once, load_engine_from_dir, init_engine_once, search, update_documents};
 
 const EMPTY_JSON: &str = "{\"answer\":null,\"answers\":[],\"results\":[]}";
 
@@ -49,6 +49,7 @@ pub extern "C" fn init_engine_from_file(path: *const c_char) {
     store_path.set_extension("textstore");
     config.text_store_path = Some(store_path.to_string_lossy().to_string());
     config.text_store_mmap = true;
+    config.vector_mmap = true;
     config.vector_quantize = false;
     config.ann_enabled = false;
     config.hnsw_enabled = true;
@@ -94,6 +95,7 @@ pub extern "C" fn init_engine_from_json(json: *const c_char) {
     config.hnsw_ef_search = 64;
     config.pq_enabled = false;
     config.low_memory = true;
+    config.vector_mmap = true;
 
     let (head, tail) = split_docs(docs);
     let engine = SearchEngine::new(head, config);
@@ -121,13 +123,14 @@ pub extern "C" fn init_engine_from_index(dir: *const c_char) {
     let mut config = Config::default();
     config.low_memory = true;
     config.text_store_mmap = true;
+    config.vector_mmap = true;
     config.hnsw_enabled = true;
     config.hnsw_m = 16;
     config.hnsw_ef_construction = 128;
     config.hnsw_ef_search = 64;
-    match SearchEngine::load_index(dir_str.as_ref(), config) {
+    match load_engine_from_dir(dir_str.as_ref(), config) {
         Ok(engine) => {
-            if !init_engine_once(engine) {
+            if !init_engine_instance_once(engine) {
                 eprintln!("[ffi] engine already initialized; skipping");
             }
         }

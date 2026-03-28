@@ -109,6 +109,7 @@ pub struct Config {
     pub cache_size: usize,
     pub text_store_path: Option<String>,
     pub text_store_mmap: bool,
+    pub vector_mmap: bool,
 }
 
 impl Default for Config {
@@ -142,6 +143,7 @@ impl Default for Config {
             cache_size: 100,
             text_store_path: None,
             text_store_mmap: true,
+            vector_mmap: true,
         }
     }
 }
@@ -509,7 +511,7 @@ impl SearchEngine {
             None
         };
         store.save_meta(&IndexMeta {
-            version: 1,
+            version: 2,
             text_store_file,
             doc_count: self.chunks.len(),
             deleted_count: self.deleted.len(),
@@ -539,7 +541,7 @@ impl SearchEngine {
             })
             .collect();
         let bm25 = store.load_bm25()?;
-        let mut vector = store.load_vector()?;
+        let mut vector = store.load_vector(config.vector_mmap)?;
         let cache = Mutex::new(QueryCache::new(config.cache_size));
         let deleted = store.load_deleted().unwrap_or_default().into_iter().collect();
 
@@ -570,6 +572,157 @@ impl SearchEngine {
             }
         }
         Ok(Self { chunks, bm25, vector, config, cache, text_store, deleted, term_buckets, meta })
+    }
+}
+
+#[derive(Debug)]
+pub struct ShardedEngine {
+    shards: Vec<SearchEngine>,
+    results_top_k: usize,
+}
+
+impl ShardedEngine {
+    pub fn load_shards(dir: &str, config: Config) -> std::io::Result<Self> {
+        let mut shards = Vec::new();
+        let mut results_top_k = config.results_top_k;
+        let shard_dirs = find_shard_dirs(Path::new(dir))?;
+        if shard_dirs.is_empty() {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no shard directories found"));
+        }
+        for shard in shard_dirs {
+            let engine = SearchEngine::load_index(shard.to_string_lossy().as_ref(), config.clone())?;
+            results_top_k = results_top_k.max(engine.config.results_top_k);
+            shards.push(engine);
+        }
+        Ok(Self { shards, results_top_k })
+    }
+
+    pub fn search(&self, query: &str) -> SearchResponse {
+        let mut results: Vec<ResultItem> = Vec::new();
+        let mut answers: Vec<Answer> = Vec::new();
+        let mut best_answer: Option<Answer> = None;
+        for engine in &self.shards {
+            let resp = engine.search(query);
+            if let Some(ans) = resp.answer {
+                let better = best_answer
+                    .as_ref()
+                    .map(|b| ans.confidence > b.confidence)
+                    .unwrap_or(true);
+                if better {
+                    best_answer = Some(ans.clone());
+                }
+                answers.push(ans);
+            }
+            answers.extend(resp.answers);
+            results.extend(resp.results);
+        }
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.dedup_by(|a, b| a.id == b.id);
+        results.truncate(self.results_top_k);
+
+        answers.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        answers.truncate(3);
+
+        SearchResponse {
+            answer: best_answer,
+            answers,
+            results,
+        }
+    }
+
+    pub fn index_health(&self) -> IndexHealth {
+        let mut doc_count = 0usize;
+        let mut deleted_count = 0usize;
+        let mut vector_bytes = 0usize;
+        let mut text_store_bytes = 0u64;
+        let mut version = 0u32;
+        let mut updated_at = 0u64;
+        for shard in &self.shards {
+            let health = shard.index_health();
+            doc_count += health.doc_count;
+            deleted_count += health.deleted_count;
+            vector_bytes += health.vector_bytes;
+            text_store_bytes += health.text_store_bytes;
+            version = version.max(health.index_version);
+            updated_at = updated_at.max(health.index_updated_at);
+        }
+        IndexHealth {
+            doc_count,
+            deleted_count,
+            index_version: version,
+            index_updated_at: updated_at,
+            text_store_bytes,
+            vector_bytes,
+            ok: true,
+            message: "sharded index loaded".to_string(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum EngineInstance {
+    Single(SearchEngine),
+    Sharded(ShardedEngine),
+}
+
+impl EngineInstance {
+    pub fn search(&self, query: &str) -> SearchResponse {
+        match self {
+            EngineInstance::Single(engine) => engine.search(query),
+            EngineInstance::Sharded(engine) => engine.search(query),
+        }
+    }
+
+    pub fn update_documents(&mut self, docs: Vec<Document>) -> usize {
+        match self {
+            EngineInstance::Single(engine) => engine.update_documents(docs),
+            EngineInstance::Sharded(_) => 0,
+        }
+    }
+
+    pub fn delete_documents(&mut self, ids: &[String]) -> usize {
+        match self {
+            EngineInstance::Single(engine) => engine.delete_documents(ids),
+            EngineInstance::Sharded(_) => 0,
+        }
+    }
+
+    pub fn index_health(&self) -> IndexHealth {
+        match self {
+            EngineInstance::Single(engine) => engine.index_health(),
+            EngineInstance::Sharded(engine) => engine.index_health(),
+        }
+    }
+}
+
+fn find_shard_dirs(root: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
+    let mut dirs = Vec::new();
+    if !root.is_dir() {
+        return Ok(dirs);
+    }
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with("shard_") {
+                    dirs.push(path);
+                }
+            }
+        }
+    }
+    dirs.sort();
+    Ok(dirs)
+}
+
+pub fn load_engine_from_dir(dir: &str, config: Config) -> std::io::Result<EngineInstance> {
+    let shard_dirs = find_shard_dirs(Path::new(dir))?;
+    if !shard_dirs.is_empty() {
+        let sharded = ShardedEngine::load_shards(dir, config)?;
+        Ok(EngineInstance::Sharded(sharded))
+    } else {
+        let engine = SearchEngine::load_index(dir, config)?;
+        Ok(EngineInstance::Single(engine))
     }
 }
 
@@ -637,13 +790,17 @@ fn levenshtein(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 
-static ENGINE: OnceLock<Mutex<SearchEngine>> = OnceLock::new();
+static ENGINE: OnceLock<Mutex<EngineInstance>> = OnceLock::new();
 
 pub fn init_engine(engine: SearchEngine) {
-    let _ = ENGINE.set(Mutex::new(engine));
+    let _ = ENGINE.set(Mutex::new(EngineInstance::Single(engine)));
 }
 
 pub fn init_engine_once(engine: SearchEngine) -> bool {
+    ENGINE.set(Mutex::new(EngineInstance::Single(engine))).is_ok()
+}
+
+pub fn init_engine_instance_once(engine: EngineInstance) -> bool {
     ENGINE.set(Mutex::new(engine)).is_ok()
 }
 
