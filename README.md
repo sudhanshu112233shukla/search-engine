@@ -231,7 +231,7 @@ Metrics:
 
 ## Roadmap
 
-- Larger datasets (1M+ docs)
+- Multi-million document scale beyond 1M
 - Personalization and feedback signals
 - Better multilingual stemming
 - Streaming updates and pack diffing
@@ -241,3 +241,4 @@ Metrics:
 ## License
 
 MIT (add a LICENSE file if needed)
+
