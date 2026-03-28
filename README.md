@@ -1,49 +1,30 @@
-# Offline Hybrid Search Engine (Rust Core + Android App)
+# Offline Hybrid Search Engine
 
-A production-grade, **offline-first search engine** with a Rust core and a modern Android app. It combines **BM25 keyword search**, **semantic similarity**, multi-signal ranking, exact answer extraction, and evaluation tooling. Everything runs **on-device** without a server.
+A production-grade, offline-first search engine with a Rust core and an Android app. It delivers fast, private, on-device search using hybrid retrieval (BM25 + semantic), multi-signal ranking, and exact answer extraction. Built for mobile scale and designed to run without servers.
 
 ---
 
-## 1. Project Overview
+## Why This Exists
 
-What it does:
-- On-device hybrid search (BM25 + semantic)
-- Multi-signal ranking (exact, phrase, proximity)
+Most search systems assume connectivity, servers, and cloud compute. This project proves the opposite: a full search engine that works **entirely offline**, optimized for mobile devices and large local datasets. It is designed for startups and teams building private knowledge bases, offline apps, or device-first products.
+
+---
+
+## Highlights
+
+- Hybrid retrieval: BM25 keyword + semantic similarity
+- Multi-signal ranking: exact match, phrase match, proximity
 - Exact answer extraction with confidence
-- Offline Android app (Jetpack Compose)
-- Evaluation tooling (precision, recall, MRR)
-
-Why it matters:
-- Works without internet
-- Fast and private
-- Ideal for offline knowledge bases and local docs
-
----
-
-## 2. Features
-
-- Hybrid retrieval (BM25 + semantic)
-- Multi-signal ranking (bm25, semantic, exact, phrase, proximity)
-- Answer extraction and confidence scoring
-- Snippet generation + highlighting
-- Query cache
-- IVF ANN vector search + int8 quantized vectors
-- PQ (Product Quantization) for large corpora
-- Persistent on-disk index (save/load)
-- Disk-based URL frontier (crawler scale)
-- Low-memory mode (text on disk; tokens on demand)
-- Incremental index maintenance (merge, delete, compact)
-- Deduplication (exact + near-duplicate simhash)
-- Unicode-aware tokenization + light stemming
-- Offline dataset loading
-- Android app (Compose + MVVM)
-- Evaluation CLI (precision@10, recall@10, MRR)
-- Full ingestion pipeline (crawler -> processor -> index)
-- Language packs + offline pack downloader
+- ANN acceleration: IVF + PQ and HNSW for large corpora
+- Persistent on-disk index (fast startup, low memory)
+- Incremental updates (merge, delete, compact)
+- Offline dataset packs with language + profile selection
+- Android app with Compose + MVVM
+- Evaluation framework (precision@K, recall@K, MRR)
 
 ---
 
-## 3. Architecture
+## Architecture
 
 ```
 User
@@ -55,7 +36,7 @@ Rust FFI (JNI)
 Search Engine Core
   - BM25
   - Vector Similarity
-  - ANN (IVF + PQ)
+  - ANN (IVF + PQ / HNSW)
   - Multi-Signal Ranking
   - Answer Extraction
   - Snippet Generation
@@ -65,31 +46,31 @@ Results + Answers
 
 ---
 
-## 4. Repo Structure
+## Repository Layout
 
 ```
 search-engine/
 +-- android_app/        # Android app (Compose + MVVM)
 +-- search_engine_rust/ # Rust search core + FFI
-+-- evaluation/         # Evaluation queries
-+-- docs/               # Documentation + assets
++-- evaluation/         # Evaluation datasets
++-- docs/               # Documentation and assets
 +-- README.md
 ```
 
 ---
 
-## 5. Quickstart (Demo)
+## Quickstart
 
 ### Option A: Android App (recommended)
 
-1) Build Rust libs:
+1. Build Rust libraries
 ```bash
 cd search_engine_rust
 cargo build --release --target aarch64-linux-android
 cargo build --release --target armv7-linux-androideabi
 ```
 
-2) Copy .so files:
+2. Copy `.so` files
 ```
 search_engine_rust/target/aarch64-linux-android/release/libsearch_engine_rust.so
 search_engine_rust/target/armv7-linux-androideabi/release/libsearch_engine_rust.so
@@ -100,9 +81,10 @@ android_app/app/src/main/jniLibs/arm64-v8a/
 android_app/app/src/main/jniLibs/armeabi-v7a/
 ```
 
-3) Open `android_app/` in Android Studio and run.
+3. Open `android_app/` in Android Studio and run.
 
-### Option B: Rust CLI (index + search)
+### Option B: Rust CLI
+
 ```bash
 cd search_engine_rust
 cargo run -- build-index --dataset data/index/dataset.json --out data/index_store
@@ -111,11 +93,11 @@ cargo run -- load-index --dir data/index_store
 
 ---
 
-## 6. Dataset Packs (Offline Bundles)
+## Offline Packs (Language + Profile)
 
-We ship and load **index packs** so Android can run fully offline.
+Packs allow the Android app to run fully offline with large datasets.
 
-### Build packs
+Build packs:
 ```bash
 cd search_engine_rust
 cargo run -- pack --dataset data/index/dataset.json --out data/packs --max-docs 50000 --lang en --download-base https://example.com/packs
@@ -130,13 +112,13 @@ data/packs/
     shard_0001/
 ```
 
-### Android usage
-- If a downloaded pack exists in `filesDir/packs_download/<lang>/<profile>`, it is used.
-- Otherwise, the app loads from assets.
+Android uses:
+- Downloaded packs in `filesDir/packs_download/<lang>/<profile>`
+- Assets fallback if no download exists
 
 ---
 
-## 7. Ingestion Pipeline (Crawler -> Processor -> Index)
+## Ingestion Pipeline
 
 From `search_engine_rust/`:
 
@@ -162,11 +144,11 @@ Config file: `search_engine_rust/config.json`
 Outputs:
 - Raw pages: `data/raw/pages.jsonl`
 - Processed chunks: `data/processed/chunks.jsonl`
-- Dataset for engine: `data/index/dataset.json`
+- Index dataset: `data/index/dataset.json`
 
 ---
 
-## 8. Import Real-World Datasets
+## Import Real-World Datasets
 
 ### Wikipedia (XML dump)
 ```bash
@@ -185,7 +167,7 @@ cargo run -- import-warc --warc CC-MAIN-2024-10.warc.gz --out data/web.jsonl --l
 
 ---
 
-## 9. Persistent Index (Save/Load)
+## Persistent Index
 
 Build on-disk index:
 ```bash
@@ -214,14 +196,14 @@ cargo run -- compact --dir data/index_store --out data/index_store_compact
 
 ---
 
-## 10. Evaluation (Quality Metrics)
+## Evaluation
 
 ```bash
 cd search_engine_rust
 cargo run -- eval ../evaluation/queries.json
 ```
 
-Metrics include:
+Metrics:
 - Precision@10
 - Recall@10
 - MRR
@@ -230,34 +212,24 @@ Metrics include:
 
 ---
 
-## 11. Demo Queries
+## Performance Targets
 
-See `docs/demo_queries.md` for sample queries and expected behavior.
-
----
-
-## 12. Performance Notes
-
-- Designed for **<200ms** search on mobile-sized datasets
-- Fully offline; no network calls
-- Memory scales with dataset size
-- Query cache reduces repeated computation
-- Low-memory mode for **100K+ docs**
-- Quantized vectors reduce memory ~4x
-- IVF + PQ reduces vector search latency on large corpora
-- Partial indexing allows search before full build completes
+- <200ms search on mobile-sized datasets
+- Low-memory mode for 100K+ docs
+- ANN acceleration for large vector corpora
+- Fully offline operation
 
 ---
 
-## 13. Future Work
+## Roadmap
 
 - Larger datasets (1M+ docs)
-- Personalization + feedback signals
+- Personalization and feedback signals
 - Better multilingual stemming
-- HNSW for higher ANN recall
+- Streaming updates and pack diffing
 
 ---
 
 ## License
 
-MIT (add your license file if needed)
+MIT (add a LICENSE file if needed)
