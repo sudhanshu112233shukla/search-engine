@@ -95,7 +95,8 @@ fn main() {
             let max_docs = value_after(&args, "--max-docs")
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(50000);
-            pipeline::run(PipelineCommand::Pack { dataset, out, max_docs }, pipeline_config);
+            let lang = value_after(&args, "--lang").unwrap_or_else(|| "en".to_string());
+            pipeline::run(PipelineCommand::Pack { dataset, out, max_docs, lang }, pipeline_config);
         }
         _ => print_usage(),
     }
@@ -115,6 +116,6 @@ fn print_usage() {
     eprintln!("  cargo run -- merge-index --dir data/index_store --update data/index/dataset.json");
     eprintln!("  cargo run -- delete --dir data/index_store doc:<id> doc:<id>");
     eprintln!("  cargo run -- compact --dir data/index_store --out data/index_store_compact");
-    eprintln!("  cargo run -- pack --dataset data/index/dataset.json --out data/packs --max-docs 50000");
+    eprintln!("  cargo run -- pack --dataset data/index/dataset.json --out data/packs --max-docs 50000 --lang en");
     eprintln!("  cargo run -- eval evaluation/queries.json");
 }

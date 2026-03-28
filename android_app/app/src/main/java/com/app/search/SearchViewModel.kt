@@ -33,7 +33,9 @@ data class SearchUiState(
     val textStoreSizeMb: String = "",
     val lastInit: String = "",
     val bundleProfile: String = "default",
-    val bundleAvailable: Boolean = false
+    val bundleLanguage: String = "en",
+    val bundleAvailable: Boolean = false,
+    val availableLanguages: List<String> = emptyList()
 )
 
 class SearchViewModel(private val appContext: Context) : ViewModel() {
@@ -51,8 +53,10 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
         if (initialized.compareAndSet(false, true)) {
             val history = historyStore.load()
             val profile = bundlePrefs.getProfile()
+            val language = bundlePrefs.getLanguage()
             val bundleManifest = BundleManager.loadManifest(appContext)
             val bundleAvailable = bundleManifest != null
+            val langs = bundleManifest?.let { BundleManager.languages(it) } ?: emptyList()
             val datasetSize = FileSize.formatMb(datasetPath)
             val textStorePath = datasetPath.replace(Regex("\\.[^.]+"), ".textstore")
             val textStoreSize = FileSize.formatMb(textStorePath)
@@ -66,7 +70,9 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                     textStoreSizeMb = textStoreSize,
                     lastInit = TimeFormat.now(),
                     bundleProfile = profile,
-                    bundleAvailable = bundleAvailable
+                    bundleLanguage = language,
+                    bundleAvailable = bundleAvailable,
+                    availableLanguages = langs
                 )
             }
 
@@ -83,7 +89,7 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
             viewModelScope.launch {
                 val ok = withContext(Dispatchers.IO) {
                     runCatching {
-                        val packDir = DatasetLoader.prepareIndexPack(appContext, profile)
+                        val packDir = DatasetLoader.prepareIndexPack(appContext, language, profile)
                         if (packDir != null) {
                             NativeSearchEngine.initIndex(packDir)
                         } else {
@@ -174,6 +180,11 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
     fun setProfile(profile: String) {
         bundlePrefs.setProfile(profile)
         _state.update { it.copy(bundleProfile = profile) }
+    }
+
+    fun setLanguage(language: String) {
+        bundlePrefs.setLanguage(language)
+        _state.update { it.copy(bundleLanguage = language) }
     }
 }
 

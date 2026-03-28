@@ -1,7 +1,7 @@
 ﻿use std::fs;
 use std::path::Path;
 
-use crate::bundle::{BundleManifest, BundleProfile, ShardInfo, dir_size, shard_dir};
+use crate::bundle::{BundleManifest, BundleProfile, LanguagePack, ShardInfo, dir_size, shard_dir};
 use crate::crawler::{CrawlConfig, Crawler};
 use crate::processor::{ProcessConfig, Processor};
 use crate::storage::{PipelineConfig, StorageManager};
@@ -17,7 +17,7 @@ pub enum Command {
     MergeIndex { dir: String, update: String },
     Delete { dir: String, ids: Vec<String> },
     Compact { dir: String, out: String },
-    Pack { dataset: String, out: String, max_docs: usize },
+    Pack { dataset: String, out: String, max_docs: usize, lang: String },
 }
 
 pub fn load_config(path: &str) -> PipelineConfig {
@@ -120,8 +120,8 @@ pub fn run(cmd: Command, config: PipelineConfig) {
                 eprintln!("Compact save failed: {err}");
             }
         }
-        Command::Pack { dataset, out, max_docs } => {
-            pack_dataset(&dataset, &out, max_docs);
+        Command::Pack { dataset, out, max_docs, lang } => {
+            pack_dataset(&dataset, &out, max_docs, &lang);
         }
     }
 }
@@ -145,21 +145,21 @@ fn build_index_from_dataset(dataset: &str, out: &str) {
     }
 }
 
-fn pack_dataset(dataset: &str, out: &str, max_docs: usize) {
+fn pack_dataset(dataset: &str, out: &str, max_docs: usize, lang: &str) {
     let docs = std::fs::read_to_string(dataset).unwrap_or_else(|_| "[]".to_string());
     let parsed = serde_json::from_str::<Vec<Document>>(&docs).unwrap_or_default();
     if parsed.is_empty() {
         eprintln!("No documents loaded from dataset");
         return;
     }
-    let out_root = Path::new(out);
+    let out_root = Path::new(out).join(lang);
     let mut shards = Vec::new();
     let mut start = 0usize;
     let mut index = 0usize;
     while start < parsed.len() {
         let end = (start + max_docs).min(parsed.len());
         let slice = parsed[start..end].to_vec();
-        let shard_path = shard_dir(out_root, index);
+        let shard_path = shard_dir(&out_root, index);
         let shard_str = shard_path.to_string_lossy().to_string();
         let mut cfg = Config::default();
         cfg.vector_quantize = true;
@@ -175,7 +175,7 @@ fn pack_dataset(dataset: &str, out: &str, max_docs: usize) {
         let bytes = dir_size(&shard_path);
         shards.push(ShardInfo {
             name: format!("shard_{:04}", index),
-            path: shard_str,
+            path: shard_path.to_string_lossy().to_string(),
             docs: slice.len(),
             bytes,
         });
@@ -183,14 +183,29 @@ fn pack_dataset(dataset: &str, out: &str, max_docs: usize) {
         index += 1;
     }
 
-    let manifest = BundleManifest {
-        version: 1,
-        language: "en".to_string(),
-        profiles: vec![
-            BundleProfile { name: "default".to_string(), max_bytes: 1_000_000_000 },
-            BundleProfile { name: "power".to_string(), max_bytes: 5_000_000_000 },
-        ],
+    let manifest_path = Path::new(out).join("manifest.json");
+    let mut manifest = if manifest_path.exists() {
+        BundleManifest::load(&manifest_path).unwrap_or(BundleManifest { version: 1, languages: Vec::new() })
+    } else {
+        BundleManifest { version: 1, languages: Vec::new() }
+    };
+
+    let profiles = vec![
+        BundleProfile { name: "default".to_string(), max_bytes: 1_000_000_000 },
+        BundleProfile { name: "power".to_string(), max_bytes: 5_000_000_000 },
+    ];
+
+    let pack = LanguagePack {
+        code: lang.to_string(),
+        profiles,
         shards,
     };
-    let _ = manifest.save(&out_root.join("manifest.json"));
+
+    if let Some(existing) = manifest.languages.iter_mut().find(|l| l.code == lang) {
+        *existing = pack;
+    } else {
+        manifest.languages.push(pack);
+    }
+
+    let _ = manifest.save(&manifest_path);
 }

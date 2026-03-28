@@ -18,12 +18,12 @@ object DatasetLoader {
         return outFile.absolutePath
     }
 
-    fun prepareIndexPack(context: Context, profile: String): String? {
+    fun prepareIndexPack(context: Context, language: String, profile: String): String? {
         val manifest = BundleManager.loadManifest(context) ?: return null
-        val shards = BundleManager.selectShards(manifest, profile)
+        val shards = BundleManager.selectShards(manifest, language, profile)
         if (shards.isEmpty()) return null
 
-        val packRoot = File(context.filesDir, "packs/$profile")
+        val packRoot = File(context.filesDir, "packs/$language/$profile")
         if (packRoot.exists() && packRoot.listFiles()?.isNotEmpty() == true) {
             return packRoot.absolutePath
         }

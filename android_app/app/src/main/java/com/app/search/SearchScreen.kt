@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -65,7 +66,13 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
     }
 
     if (state.showSettings) {
-        SettingsScreen(state, onBack = { viewModel.onBack() }, onClearHistory = { viewModel.clearHistory() }, onProfile = { viewModel.setProfile(it) })
+        SettingsScreen(
+            state,
+            onBack = { viewModel.onBack() },
+            onClearHistory = { viewModel.clearHistory() },
+            onProfile = { viewModel.setProfile(it) },
+            onLanguage = { viewModel.setLanguage(it) }
+        )
         return
     }
 
@@ -293,7 +300,8 @@ fun SettingsScreen(
     state: SearchUiState,
     onBack: () -> Unit,
     onClearHistory: () -> Unit,
-    onProfile: (String) -> Unit
+    onProfile: (String) -> Unit,
+    onLanguage: (String) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Back", modifier = Modifier.clickable { onBack() })
@@ -304,8 +312,18 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(16.dp))
         Text("Offline bundle", style = MaterialTheme.typography.titleSmall)
         if (state.bundleAvailable) {
-            Text("Current: ${state.bundleProfile}")
+            Text("Language: ${state.bundleLanguage}")
+            if (state.availableLanguages.isNotEmpty()) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.availableLanguages.forEach { lang ->
+                        Text(lang, modifier = Modifier
+                            .clickable { onLanguage(lang) }
+                            .padding(vertical = 6.dp))
+                    }
+                }
+            }
             Spacer(modifier = Modifier.height(8.dp))
+            Text("Profile: ${state.bundleProfile}")
             RowItem("default (1GB)") { onProfile("default") }
             RowItem("power (5GB)") { onProfile("power") }
         } else {

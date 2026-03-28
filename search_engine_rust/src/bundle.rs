@@ -18,11 +18,16 @@ pub struct ShardInfo {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BundleManifest {
-    pub version: u32,
-    pub language: String,
+pub struct LanguagePack {
+    pub code: String,
     pub profiles: Vec<BundleProfile>,
     pub shards: Vec<ShardInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BundleManifest {
+    pub version: u32,
+    pub languages: Vec<LanguagePack>,
 }
 
 impl BundleManifest {
@@ -35,9 +40,7 @@ impl BundleManifest {
         let data = fs::read_to_string(path)?;
         let parsed = serde_json::from_str(&data).unwrap_or(BundleManifest {
             version: 1,
-            language: "en".to_string(),
-            profiles: Vec::new(),
-            shards: Vec::new(),
+            languages: Vec::new(),
         });
         Ok(parsed)
     }
