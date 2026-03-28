@@ -65,6 +65,18 @@ pub struct ResultItem {
     pub score: f32,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct IndexHealth {
+    pub doc_count: usize,
+    pub deleted_count: usize,
+    pub index_version: u32,
+    pub index_updated_at: u64,
+    pub text_store_bytes: u64,
+    pub vector_bytes: usize,
+    pub ok: bool,
+    pub message: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
     pub chunking: ChunkingConfig,
@@ -167,6 +179,7 @@ pub struct SearchEngine {
     text_store: Option<TextStore>,
     deleted: HashSet<String>,
     term_buckets: HashMap<(String, usize), Vec<String>>,
+    meta: IndexMeta,
 }
 
 impl SearchEngine {
@@ -211,6 +224,13 @@ impl SearchEngine {
         };
 
         let term_buckets = build_term_buckets(&bm25);
+        let meta = IndexMeta {
+            version: 1,
+            text_store_file: config.text_store_path.clone(),
+            doc_count: chunks.len(),
+            deleted_count: 0,
+            updated_at: IndexStore::now_ts(),
+        };
 
         if config.low_memory {
             for chunk in &mut chunks {
@@ -218,7 +238,7 @@ impl SearchEngine {
                 chunk.positions.clear();
             }
         }
-        Self { chunks, bm25, vector, config, cache, text_store, deleted: HashSet::new(), term_buckets }
+        Self { chunks, bm25, vector, config, cache, text_store, deleted: HashSet::new(), term_buckets, meta }
     }
 
     pub fn search(&self, query: &str) -> SearchResponse {
@@ -380,6 +400,22 @@ impl SearchEngine {
         total
     }
 
+    pub fn index_health(&self) -> IndexHealth {
+        let text_bytes = self.text_store.as_ref().map(|t| t.byte_len()).unwrap_or(0);
+        let ok = self.meta.doc_count >= self.deleted.len();
+        let message = if ok { "ok" } else { "metadata mismatch" };
+        IndexHealth {
+            doc_count: self.meta.doc_count,
+            deleted_count: self.deleted.len(),
+            index_version: self.meta.version,
+            index_updated_at: self.meta.updated_at,
+            text_store_bytes: text_bytes,
+            vector_bytes: self.vector.approx_bytes(),
+            ok,
+            message: message.to_string(),
+        }
+    }
+
     pub fn update_documents(&mut self, docs: Vec<Document>) -> usize {
         if docs.is_empty() {
             return 0;
@@ -395,6 +431,8 @@ impl SearchEngine {
         self.vector.add_chunks(&new_chunks);
         update_term_buckets(&mut self.term_buckets, &new_chunks);
         self.chunks.extend(new_chunks);
+        self.meta.doc_count = self.chunks.len();
+        self.meta.updated_at = IndexStore::now_ts();
         added
     }
 
@@ -405,6 +443,8 @@ impl SearchEngine {
                 count += 1;
             }
         }
+        self.meta.deleted_count = self.deleted.len();
+        self.meta.updated_at = IndexStore::now_ts();
         count
     }
 
@@ -502,7 +542,7 @@ impl SearchEngine {
                 chunk.positions.clear();
             }
         }
-        Ok(Self { chunks, bm25, vector, config, cache, text_store, deleted, term_buckets })
+        Ok(Self { chunks, bm25, vector, config, cache, text_store, deleted, term_buckets, meta })
     }
 }
 
@@ -605,4 +645,13 @@ pub fn delete_documents(ids: Vec<String>) -> usize {
         }
     }
     0
+}
+
+pub fn index_health() -> Option<IndexHealth> {
+    if let Some(engine) = ENGINE.get() {
+        if let Ok(engine) = engine.lock() {
+            return Some(engine.index_health());
+        }
+    }
+    None
 }
