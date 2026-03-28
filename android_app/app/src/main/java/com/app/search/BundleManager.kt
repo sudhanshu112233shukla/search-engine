@@ -12,6 +12,7 @@ data class LanguagePack(val code: String, val profiles: List<BundleProfile>, val
 
 data class BundleManifest(
     val version: Int,
+    val downloadBase: String?,
     val languages: List<LanguagePack>
 )
 
@@ -52,6 +53,7 @@ object BundleManager {
             }
             BundleManifest(
                 version = obj.optInt("version", 1),
+                downloadBase = obj.optString("download_base", null),
                 languages = languages
             )
         } catch (_: Exception) {

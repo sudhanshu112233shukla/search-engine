@@ -27,6 +27,7 @@ pub struct LanguagePack {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BundleManifest {
     pub version: u32,
+    pub download_base: Option<String>,
     pub languages: Vec<LanguagePack>,
 }
 
@@ -40,6 +41,7 @@ impl BundleManifest {
         let data = fs::read_to_string(path)?;
         let parsed = serde_json::from_str(&data).unwrap_or(BundleManifest {
             version: 1,
+            download_base: None,
             languages: Vec::new(),
         });
         Ok(parsed)

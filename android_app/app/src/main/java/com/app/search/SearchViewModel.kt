@@ -35,7 +35,10 @@ data class SearchUiState(
     val bundleProfile: String = "default",
     val bundleLanguage: String = "en",
     val bundleAvailable: Boolean = false,
-    val availableLanguages: List<String> = emptyList()
+    val availableLanguages: List<String> = emptyList(),
+    val downloading: Boolean = false,
+    val downloadProgress: Float = 0f,
+    val downloadMessage: String = ""
 )
 
 class SearchViewModel(private val appContext: Context) : ViewModel() {
@@ -185,6 +188,23 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
     fun setLanguage(language: String) {
         bundlePrefs.setLanguage(language)
         _state.update { it.copy(bundleLanguage = language) }
+    }
+
+    fun downloadSelectedPack() {
+        val manifest = BundleManager.loadManifest(appContext) ?: return
+        val language = _state.value.bundleLanguage
+        val profile = _state.value.bundleProfile
+        if (manifest.downloadBase.isNullOrBlank()) {
+            _state.update { it.copy(error = "No download base configured") }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            _state.update { it.copy(downloading = true, downloadProgress = 0f, downloadMessage = "Starting download") }
+            val ok = DownloadManager.downloadPack(appContext, manifest, language, profile) { progress, msg ->
+                _state.update { it.copy(downloadProgress = progress, downloadMessage = msg) }
+            }
+            _state.update { it.copy(downloading = false, downloadProgress = if (ok) 1f else it.downloadProgress, downloadMessage = if (ok) "Download complete" else "Download failed") }
+        }
     }
 }
 

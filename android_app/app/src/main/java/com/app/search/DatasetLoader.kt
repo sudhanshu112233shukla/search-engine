@@ -19,6 +19,11 @@ object DatasetLoader {
     }
 
     fun prepareIndexPack(context: Context, language: String, profile: String): String? {
+        val downloaded = File(context.filesDir, "packs_download/$language/$profile")
+        if (downloaded.exists() && downloaded.listFiles()?.isNotEmpty() == true) {
+            return downloaded.absolutePath
+        }
+
         val manifest = BundleManager.loadManifest(context) ?: return null
         val shards = BundleManager.selectShards(manifest, language, profile)
         if (shards.isEmpty()) return null

@@ -71,7 +71,8 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             onBack = { viewModel.onBack() },
             onClearHistory = { viewModel.clearHistory() },
             onProfile = { viewModel.setProfile(it) },
-            onLanguage = { viewModel.setLanguage(it) }
+            onLanguage = { viewModel.setLanguage(it) },
+            onDownload = { viewModel.downloadSelectedPack() }
         )
         return
     }
@@ -301,7 +302,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onClearHistory: () -> Unit,
     onProfile: (String) -> Unit,
-    onLanguage: (String) -> Unit
+    onLanguage: (String) -> Unit,
+    onDownload: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Back", modifier = Modifier.clickable { onBack() })
@@ -326,6 +328,13 @@ fun SettingsScreen(
             Text("Profile: ${state.bundleProfile}")
             RowItem("default (1GB)") { onProfile("default") }
             RowItem("power (5GB)") { onProfile("power") }
+            Spacer(modifier = Modifier.height(8.dp))
+            RowItem(if (state.downloading) "Downloading..." else "Download pack") { onDownload() }
+            if (state.downloading) {
+                Spacer(modifier = Modifier.height(6.dp))
+                LinearProgressIndicator(progress = { state.downloadProgress }, modifier = Modifier.fillMaxWidth())
+                Text(state.downloadMessage, style = MaterialTheme.typography.bodySmall)
+            }
         } else {
             Text("No bundle manifest found in assets")
         }

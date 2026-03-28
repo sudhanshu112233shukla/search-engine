@@ -17,7 +17,7 @@ pub enum Command {
     MergeIndex { dir: String, update: String },
     Delete { dir: String, ids: Vec<String> },
     Compact { dir: String, out: String },
-    Pack { dataset: String, out: String, max_docs: usize, lang: String },
+    Pack { dataset: String, out: String, max_docs: usize, lang: String, download_base: Option<String> },
 }
 
 pub fn load_config(path: &str) -> PipelineConfig {
@@ -120,8 +120,8 @@ pub fn run(cmd: Command, config: PipelineConfig) {
                 eprintln!("Compact save failed: {err}");
             }
         }
-        Command::Pack { dataset, out, max_docs, lang } => {
-            pack_dataset(&dataset, &out, max_docs, &lang);
+        Command::Pack { dataset, out, max_docs, lang, download_base } => {
+            pack_dataset(&dataset, &out, max_docs, &lang, download_base);
         }
     }
 }
@@ -145,7 +145,7 @@ fn build_index_from_dataset(dataset: &str, out: &str) {
     }
 }
 
-fn pack_dataset(dataset: &str, out: &str, max_docs: usize, lang: &str) {
+fn pack_dataset(dataset: &str, out: &str, max_docs: usize, lang: &str, download_base: Option<String>) {
     let docs = std::fs::read_to_string(dataset).unwrap_or_else(|_| "[]".to_string());
     let parsed = serde_json::from_str::<Vec<Document>>(&docs).unwrap_or_default();
     if parsed.is_empty() {
@@ -185,10 +185,14 @@ fn pack_dataset(dataset: &str, out: &str, max_docs: usize, lang: &str) {
 
     let manifest_path = Path::new(out).join("manifest.json");
     let mut manifest = if manifest_path.exists() {
-        BundleManifest::load(&manifest_path).unwrap_or(BundleManifest { version: 1, languages: Vec::new() })
+        BundleManifest::load(&manifest_path).unwrap_or(BundleManifest { version: 1, download_base: None, languages: Vec::new() })
     } else {
-        BundleManifest { version: 1, languages: Vec::new() }
+        BundleManifest { version: 1, download_base: None, languages: Vec::new() }
     };
+
+    if download_base.is_some() {
+        manifest.download_base = download_base;
+    }
 
     let profiles = vec![
         BundleProfile { name: "default".to_string(), max_bytes: 1_000_000_000 },
