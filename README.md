@@ -6,7 +6,7 @@ A production-grade, offline-first search engine with a Rust core and an Android 
 
 ## Why This Exists
 
-Most search systems assume connectivity, servers, and cloud compute. This project proves the opposite: a full search engine that works **entirely offline**, optimized for mobile devices and large local datasets. It is designed for startups and teams building private knowledge bases, offline apps, or device-first products.
+Most search systems assume connectivity, servers, and cloud compute. This project proves the opposite: a full search engine that works entirely offline, optimized for mobile devices and large local datasets. It is designed for teams building private knowledge bases, offline apps, and device-first products.
 
 ---
 
@@ -17,7 +17,8 @@ Most search systems assume connectivity, servers, and cloud compute. This projec
 - Exact answer extraction with confidence
 - ANN acceleration: IVF + PQ and HNSW for large corpora
 - Persistent on-disk index (fast startup, low memory)
-- Incremental updates (merge, delete, compact)
+- Memory-mapped vectors for 100K+ to 1M docs
+- Incremental updates with WAL replay (crash-safe)
 - Offline dataset packs with language + profile selection
 - Android app with Compose + MVVM
 - Evaluation framework (precision@K, recall@K, MRR)
@@ -196,6 +197,12 @@ cargo run -- compact --dir data/index_store --out data/index_store_compact
 
 ---
 
+## Crash-Safe Updates (WAL)
+
+Updates are logged to `wal.jsonl` before applying. On restart, the engine automatically replays and clears the WAL to keep the index consistent.
+
+---
+
 ## Evaluation
 
 ```bash
@@ -216,6 +223,7 @@ Metrics:
 
 - <200ms search on mobile-sized datasets
 - Low-memory mode for 100K+ docs
+- Memory-mapped vectors for 1M docs
 - ANN acceleration for large vector corpora
 - Fully offline operation
 
