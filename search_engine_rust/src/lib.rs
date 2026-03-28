@@ -12,6 +12,7 @@ pub use processor::{Processor, ProcessConfig};
 pub use storage::{StorageManager, PipelineConfig, RawPage, ProcessedChunk};
 pub use cli::{Command as PipelineCommand};
 pub use bundle::{BundleManifest, BundleProfile, ShardInfo};
+pub use datasets::{import_osm_pbf, import_warc, import_wikipedia};
 
 use processing::{process_documents, Chunk};
 use bm25::BM25Index;
@@ -37,6 +38,7 @@ mod utils;
 mod text_store;
 mod index_store;
 mod bundle;
+mod datasets;
 mod ffi;
 mod evaluation;
 mod crawler;

@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::bundle::{BundleManifest, BundleProfile, LanguagePack, ShardInfo, dir_size, shard_dir};
 use crate::crawler::{CrawlConfig, Crawler};
+use crate::datasets::{import_osm_pbf, import_warc, import_wikipedia};
 use crate::processor::{ProcessConfig, Processor};
 use crate::storage::{PipelineConfig, StorageManager};
 use crate::{Config, Document, SearchEngine};
@@ -18,6 +19,9 @@ pub enum Command {
     Delete { dir: String, ids: Vec<String> },
     Compact { dir: String, out: String },
     Pack { dataset: String, out: String, max_docs: usize, lang: String, download_base: Option<String> },
+    ImportWiki { dump: String, out: String, limit: Option<usize> },
+    ImportOsm { pbf: String, out: String, limit: Option<usize> },
+    ImportWarc { warc: String, out: String, limit: Option<usize> },
 }
 
 pub fn load_config(path: &str) -> PipelineConfig {
@@ -122,6 +126,21 @@ pub fn run(cmd: Command, config: PipelineConfig) {
         }
         Command::Pack { dataset, out, max_docs, lang, download_base } => {
             pack_dataset(&dataset, &out, max_docs, &lang, download_base);
+        }
+        Command::ImportWiki { dump, out, limit } => {
+            if let Err(err) = import_wikipedia(&dump, &out, limit) {
+                eprintln!("Wiki import failed: {err}");
+            }
+        }
+        Command::ImportOsm { pbf, out, limit } => {
+            if let Err(err) = import_osm_pbf(&pbf, &out, limit) {
+                eprintln!("OSM import failed: {err}");
+            }
+        }
+        Command::ImportWarc { warc, out, limit } => {
+            if let Err(err) = import_warc(&warc, &out, limit) {
+                eprintln!("WARC import failed: {err}");
+            }
         }
     }
 }

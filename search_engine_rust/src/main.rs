@@ -99,6 +99,36 @@ fn main() {
             let download_base = value_after(&args, "--download-base");
             pipeline::run(PipelineCommand::Pack { dataset, out, max_docs, lang, download_base }, pipeline_config);
         }
+        "import-wiki" => {
+            let dump = value_after(&args, "--dump").unwrap_or_else(|| "".to_string());
+            let out = value_after(&args, "--out").unwrap_or_else(|| "data/wiki.jsonl".to_string());
+            let limit = value_after(&args, "--limit").and_then(|v| v.parse::<usize>().ok());
+            if dump.is_empty() {
+                eprintln!("import-wiki requires --dump <path>");
+                return;
+            }
+            pipeline::run(PipelineCommand::ImportWiki { dump, out, limit }, pipeline_config);
+        }
+        "import-osm" => {
+            let pbf = value_after(&args, "--pbf").unwrap_or_else(|| "".to_string());
+            let out = value_after(&args, "--out").unwrap_or_else(|| "data/osm.jsonl".to_string());
+            let limit = value_after(&args, "--limit").and_then(|v| v.parse::<usize>().ok());
+            if pbf.is_empty() {
+                eprintln!("import-osm requires --pbf <path>");
+                return;
+            }
+            pipeline::run(PipelineCommand::ImportOsm { pbf, out, limit }, pipeline_config);
+        }
+        "import-warc" => {
+            let warc = value_after(&args, "--warc").unwrap_or_else(|| "".to_string());
+            let out = value_after(&args, "--out").unwrap_or_else(|| "data/web.jsonl".to_string());
+            let limit = value_after(&args, "--limit").and_then(|v| v.parse::<usize>().ok());
+            if warc.is_empty() {
+                eprintln!("import-warc requires --warc <path>");
+                return;
+            }
+            pipeline::run(PipelineCommand::ImportWarc { warc, out, limit }, pipeline_config);
+        }
         _ => print_usage(),
     }
 }
@@ -118,5 +148,8 @@ fn print_usage() {
     eprintln!("  cargo run -- delete --dir data/index_store doc:<id> doc:<id>");
     eprintln!("  cargo run -- compact --dir data/index_store --out data/index_store_compact");
     eprintln!("  cargo run -- pack --dataset data/index/dataset.json --out data/packs --max-docs 50000 --lang en --download-base https://example.com/packs");
+    eprintln!("  cargo run -- import-wiki --dump enwiki-latest-pages-articles-multistream.xml.bz2 --out data/wiki.jsonl --limit 10000");
+    eprintln!("  cargo run -- import-osm --pbf planet-latest.osm.pbf --out data/osm.jsonl --limit 10000");
+    eprintln!("  cargo run -- import-warc --warc CC-MAIN-2024-10.warc.gz --out data/web.jsonl --limit 10000");
     eprintln!("  cargo run -- eval evaluation/queries.json");
 }
