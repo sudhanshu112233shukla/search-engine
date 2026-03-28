@@ -1,24 +1,4 @@
-mod ingestion;
-mod processing;
-mod bm25;
-mod embedding;
-mod vector;
-mod retrieval;
-mod ranking;
-mod extraction;
-mod confidence;
-mod utils;
-mod text_store;
-mod index_store;
-mod bundle;
-mod ffi;
-mod evaluation;
-mod crawler;
-mod processor;
-mod storage;
-mod cli;
-
-use std::collections::{HashMap, HashSet, VecDeque};
+﻿use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
@@ -40,9 +20,29 @@ use retrieval::retrieve;
 use ranking::{rank_candidates, RankingWeights, Ranked};
 use extraction::extract_answers;
 use confidence::compute_confidence;
-use utils::{make_snippet, normalize_text, process_query, tokenize};
+use utils::{detect_language, expand_tokens, make_snippet, normalize_text, tokenize_with_lang, Lang};
 use text_store::TextStore;
 use index_store::{IndexMeta, IndexStore};
+
+mod ingestion;
+mod processing;
+mod bm25;
+mod embedding;
+mod vector;
+mod retrieval;
+mod ranking;
+mod extraction;
+mod confidence;
+mod utils;
+mod text_store;
+mod index_store;
+mod bundle;
+mod ffi;
+mod evaluation;
+mod crawler;
+mod processor;
+mod storage;
+mod cli;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SearchResponse {
@@ -166,6 +166,7 @@ pub struct SearchEngine {
     cache: Mutex<QueryCache>,
     text_store: Option<TextStore>,
     deleted: HashSet<String>,
+    term_buckets: HashMap<(String, usize), Vec<String>>,
 }
 
 impl SearchEngine {
@@ -209,13 +210,15 @@ impl SearchEngine {
             None
         };
 
+        let term_buckets = build_term_buckets(&bm25);
+
         if config.low_memory {
             for chunk in &mut chunks {
                 chunk.tokens.clear();
                 chunk.positions.clear();
             }
         }
-        Self { chunks, bm25, vector, config, cache, text_store, deleted: HashSet::new() }
+        Self { chunks, bm25, vector, config, cache, text_store, deleted: HashSet::new(), term_buckets }
     }
 
     pub fn search(&self, query: &str) -> SearchResponse {
@@ -238,8 +241,10 @@ impl SearchEngine {
     }
 
     fn search_inner(&self, query: &str) -> SearchResponse {
-        let base_tokens = tokenize(query);
-        let expanded_tokens = process_query(query);
+        let lang = detect_language(query);
+        let mut base_tokens = tokenize_with_lang(query, lang);
+        base_tokens = self.correct_tokens(lang, base_tokens);
+        let expanded_tokens = expand_tokens(&base_tokens, lang);
         let clean_query = normalize_text(query);
 
         let (bm25_results, vector_results) = retrieve(
@@ -306,9 +311,25 @@ impl SearchEngine {
         SearchResponse { answer, answers, results }
     }
 
+    fn correct_tokens(&self, _lang: Lang, tokens: Vec<String>) -> Vec<String> {
+        let mut out = Vec::with_capacity(tokens.len());
+        for t in tokens {
+            if self.bm25.has_term(&t) {
+                out.push(t);
+                continue;
+            }
+            if let Some(best) = suggest_correction(&t, &self.term_buckets) {
+                out.push(best);
+            } else {
+                out.push(t);
+            }
+        }
+        out
+    }
+
     pub fn rank_debug(&self, query: &str) -> (Vec<Ranked>, Vec<(String, f32, crate::ranking::ScoreBreakdown)>) {
-        let base_tokens = tokenize(query);
-        let expanded_tokens = process_query(query);
+        let base_tokens = tokenize_with_lang(query, detect_language(query));
+        let expanded_tokens = expand_tokens(&base_tokens, detect_language(query));
         let clean_query = normalize_text(query);
 
         let (bm25_results, vector_results) = retrieve(
@@ -372,6 +393,7 @@ impl SearchEngine {
         let added = new_chunks.len();
         self.bm25.add_chunks(&new_chunks);
         self.vector.add_chunks(&new_chunks);
+        update_term_buckets(&mut self.term_buckets, &new_chunks);
         self.chunks.extend(new_chunks);
         added
     }
@@ -472,14 +494,80 @@ impl SearchEngine {
             None => None,
         };
 
+        let term_buckets = build_term_buckets(&bm25);
+
         if config.low_memory {
             for chunk in &mut chunks {
                 chunk.tokens.clear();
                 chunk.positions.clear();
             }
         }
-        Ok(Self { chunks, bm25, vector, config, cache, text_store, deleted })
+        Ok(Self { chunks, bm25, vector, config, cache, text_store, deleted, term_buckets })
     }
+}
+
+fn build_term_buckets(bm25: &BM25Index) -> HashMap<(String, usize), Vec<String>> {
+    let mut buckets: HashMap<(String, usize), Vec<String>> = HashMap::new();
+    for term in bm25.terms_iter() {
+        let key = term.chars().next().map(|c| c.to_string()).unwrap_or_default();
+        let len = term.len();
+        buckets.entry((key, len)).or_default().push(term.clone());
+    }
+    buckets
+}
+
+fn update_term_buckets(buckets: &mut HashMap<(String, usize), Vec<String>>, chunks: &[Chunk]) {
+    for chunk in chunks {
+        for token in &chunk.tokens {
+            let key = token.chars().next().map(|c| c.to_string()).unwrap_or_default();
+            let len = token.len();
+            let entry = buckets.entry((key, len)).or_default();
+            if !entry.contains(token) {
+                entry.push(token.clone());
+            }
+        }
+    }
+}
+
+fn suggest_correction(term: &str, buckets: &HashMap<(String, usize), Vec<String>>) -> Option<String> {
+    if term.len() < 3 {
+        return None;
+    }
+    let key = term.chars().next().map(|c| c.to_string()).unwrap_or_default();
+    let mut best: Option<(String, usize)> = None;
+    for len in term.len().saturating_sub(1)..=term.len() + 1 {
+        if let Some(cands) = buckets.get(&(key.clone(), len)) {
+            for cand in cands {
+                let dist = levenshtein(term, cand);
+                if dist <= 2 {
+                    if let Some((_, best_dist)) = &best {
+                        if dist < *best_dist {
+                            best = Some((cand.clone(), dist));
+                        }
+                    } else {
+                        best = Some((cand.clone(), dist));
+                    }
+                }
+            }
+        }
+    }
+    best.map(|b| b.0)
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0usize; b.len() + 1];
+    for (i, ca) in a.chars().enumerate() {
+        curr[0] = i + 1;
+        for (j, cb) in b.chars().enumerate() {
+            let cost = if ca == cb { 0 } else { 1 };
+            curr[j + 1] = (prev[j + 1] + 1)
+                .min(curr[j] + 1)
+                .min(prev[j] + cost);
+        }
+        prev.clone_from_slice(&curr);
+    }
+    prev[b.len()]
 }
 
 static ENGINE: OnceLock<Mutex<SearchEngine>> = OnceLock::new();

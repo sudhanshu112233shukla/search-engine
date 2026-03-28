@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+﻿use std::collections::HashMap;
 
-const STOPWORDS: &[&str] = &[
+const STOPWORDS_EN: &[&str] = &[
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "as", "at",
     "be", "because", "been", "before", "being", "below", "between", "both", "but", "by",
     "can", "could",
@@ -22,11 +22,47 @@ const STOPWORDS: &[&str] = &[
     "you", "your", "yours", "yourself", "yourselves",
 ];
 
-const SYNONYMS: &[(&str, &[&str])] = &[
+const STOPWORDS_ES: &[&str] = &["de", "la", "que", "el", "en", "y", "a", "los", "del", "se", "las", "por", "un", "para", "con", "no", "una", "su", "al", "lo"]; 
+const STOPWORDS_HI: &[&str] = &["और", "का", "के", "की", "में", "है", "था", "थे", "तो", "से", "पर", "यह", "वह", "एक"]; 
+
+const SYNONYMS_EN: &[(&str, &[&str])] = &[
     ("bm25", &["ranking", "tfidf", "tf-idf"]),
     ("vector", &["embedding", "semantic"]),
     ("search", &["retrieve", "retrieval"]),
 ];
+
+const SYNONYMS_ES: &[(&str, &[&str])] = &[
+    ("buscar", &["busqueda", "recuperar"]),
+    ("vector", &["embebido", "semantico"]),
+];
+
+const SYNONYMS_HI: &[(&str, &[&str])] = &[
+    ("खोज", &["सर्च", "खोजना"]),
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lang {
+    En,
+    Es,
+    Hi,
+    Other,
+}
+
+pub fn detect_language(text: &str) -> Lang {
+    for c in text.chars() {
+        if ('\u{0900}'..='\u{097F}').contains(&c) {
+            return Lang::Hi;
+        }
+        if ('\u{0400}'..='\u{04FF}').contains(&c) {
+            return Lang::Other;
+        }
+    }
+    if text.to_lowercase().contains(" el ") || text.to_lowercase().contains(" la ") {
+        Lang::Es
+    } else {
+        Lang::En
+    }
+}
 
 pub fn normalize_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -46,7 +82,16 @@ pub fn normalize_text(text: &str) -> String {
 }
 
 pub fn is_stopword(token: &str) -> bool {
-    STOPWORDS.iter().any(|w| *w == token)
+    STOPWORDS_EN.iter().any(|w| *w == token)
+}
+
+fn is_stopword_lang(token: &str, lang: Lang) -> bool {
+    match lang {
+        Lang::En => STOPWORDS_EN.iter().any(|w| *w == token),
+        Lang::Es => STOPWORDS_ES.iter().any(|w| *w == token),
+        Lang::Hi => STOPWORDS_HI.iter().any(|w| *w == token),
+        Lang::Other => false,
+    }
 }
 
 pub fn tokenize(text: &str) -> Vec<String> {
@@ -55,6 +100,15 @@ pub fn tokenize(text: &str) -> Vec<String> {
         .split_whitespace()
         .map(|s| stem_token(s))
         .filter(|t| !is_stopword(t))
+        .collect()
+}
+
+pub fn tokenize_with_lang(text: &str, lang: Lang) -> Vec<String> {
+    let normalized = normalize_text(text);
+    normalized
+        .split_whitespace()
+        .map(|s| stem_token(s))
+        .filter(|t| !is_stopword_lang(t, lang))
         .collect()
 }
 
@@ -75,18 +129,23 @@ pub fn tokenize_with_positions(text: &str) -> (Vec<String>, HashMap<String, Vec<
     (tokens, positions)
 }
 
-fn stem_token(token: &str) -> String {
-    if !token.is_ascii() {
-        return token.to_string();
-    }
-    let mut t = token.to_string();
-    for suf in ["ing", "edly", "ed", "ly", "es", "s"] {
-        if t.len() > suf.len() + 2 && t.ends_with(suf) {
-            t.truncate(t.len() - suf.len());
-            break;
+pub fn expand_tokens(tokens: &[String], lang: Lang) -> Vec<String> {
+    let mut expanded = Vec::with_capacity(tokens.len());
+    for t in tokens.iter() {
+        expanded.push(t.clone());
+        let syns = match lang {
+            Lang::En => SYNONYMS_EN.iter().find(|(k, _)| *k == t).map(|(_, v)| *v),
+            Lang::Es => SYNONYMS_ES.iter().find(|(k, _)| *k == t).map(|(_, v)| *v),
+            Lang::Hi => SYNONYMS_HI.iter().find(|(k, _)| *k == t).map(|(_, v)| *v),
+            Lang::Other => None,
+        };
+        if let Some(syns) = syns {
+            for s in syns {
+                expanded.push(s.to_string());
+            }
         }
     }
-    t
+    expanded
 }
 
 pub fn process_query(query: &str) -> Vec<String> {
@@ -94,7 +153,7 @@ pub fn process_query(query: &str) -> Vec<String> {
     let mut expanded = Vec::with_capacity(base.len());
     for t in base.iter() {
         expanded.push(t.clone());
-        if let Some(syns) = SYNONYMS.iter().find(|(k, _)| *k == t).map(|(_, v)| *v) {
+        if let Some(syns) = SYNONYMS_EN.iter().find(|(k, _)| *k == t).map(|(_, v)| *v) {
             for s in syns {
                 expanded.push(s.to_string());
             }
@@ -155,4 +214,18 @@ fn highlight_terms(text: &str, tokens: &[String]) -> String {
         out.push(' ');
     }
     out.trim().to_string()
+}
+
+fn stem_token(token: &str) -> String {
+    if !token.is_ascii() {
+        return token.to_string();
+    }
+    let mut t = token.to_string();
+    for suf in ["ing", "edly", "ed", "ly", "es", "s"] {
+        if t.len() > suf.len() + 2 && t.ends_with(suf) {
+            t.truncate(t.len() - suf.len());
+            break;
+        }
+    }
+    t
 }

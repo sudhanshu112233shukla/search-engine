@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+﻿use std::collections::HashMap;
 
 use crate::processing::Chunk;
 use serde::{Deserialize, Serialize};
@@ -103,5 +103,13 @@ impl BM25Index {
         } else {
             self.total_len as f32 / self.doc_lens.len() as f32
         };
+    }
+
+    pub fn has_term(&self, term: &str) -> bool {
+        self.terms.contains_key(term)
+    }
+
+    pub fn terms_iter(&self) -> impl Iterator<Item = &String> {
+        self.terms.keys()
     }
 }
