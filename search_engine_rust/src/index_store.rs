@@ -1,10 +1,11 @@
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Write, BufRead};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::bm25::BM25Index;
 use crate::processing::Chunk;
@@ -29,6 +30,13 @@ pub struct IndexMeta {
 
 pub struct IndexStore {
     root: PathBuf,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "op", content = "data")]
+pub enum WalOp {
+    Add(Vec<crate::Document>),
+    Delete(Vec<String>),
 }
 
 impl IndexStore {
@@ -135,6 +143,50 @@ impl IndexStore {
             fs::copy(src, &dst)?;
         }
         Ok(dst)
+    }
+
+    pub fn append_wal(&self, op: &WalOp) -> io::Result<()> {
+        self.ensure_dirs()?;
+        let line = serde_json::to_string(op).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.root.join("wal.jsonl"))?;
+        writeln!(file, "{}", line)?;
+        Ok(())
+    }
+
+    pub fn load_wal(&self) -> io::Result<Vec<WalOp>> {
+        let path = self.root.join("wal.jsonl");
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let file = fs::File::open(path)?;
+        let reader = io::BufReader::new(file);
+        let mut ops = Vec::new();
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<WalOp>(&line) {
+                Ok(op) => ops.push(op),
+                Err(_) => {
+                    if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                        eprintln!("[wal] skipped invalid entry: {}", v);
+                    }
+                }
+            }
+        }
+        Ok(ops)
+    }
+
+    pub fn clear_wal(&self) -> io::Result<()> {
+        let path = self.root.join("wal.jsonl");
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        Ok(())
     }
 
     pub fn now_ts() -> u64 {

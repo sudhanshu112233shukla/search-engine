@@ -23,7 +23,7 @@ use extraction::extract_answers;
 use confidence::compute_confidence;
 use utils::{detect_language, expand_tokens, make_snippet, normalize_text, tokenize_with_lang, Lang};
 use text_store::TextStore;
-use index_store::{IndexMeta, IndexStore};
+use index_store::{IndexMeta, IndexStore, WalOp};
 
 mod ingestion;
 mod processing;
@@ -110,6 +110,7 @@ pub struct Config {
     pub text_store_path: Option<String>,
     pub text_store_mmap: bool,
     pub vector_mmap: bool,
+    pub wal_enabled: bool,
 }
 
 impl Default for Config {
@@ -144,6 +145,7 @@ impl Default for Config {
             text_store_path: None,
             text_store_mmap: true,
             vector_mmap: true,
+            wal_enabled: true,
         }
     }
 }
@@ -192,6 +194,7 @@ pub struct SearchEngine {
     deleted: HashSet<String>,
     term_buckets: HashMap<(String, usize), Vec<String>>,
     meta: IndexMeta,
+    wal_dir: Option<String>,
 }
 
 impl SearchEngine {
@@ -241,7 +244,7 @@ impl SearchEngine {
 
         let term_buckets = build_term_buckets(&bm25);
         let meta = IndexMeta {
-            version: 1,
+            version: 2,
             text_store_file: config.text_store_path.clone(),
             doc_count: chunks.len(),
             deleted_count: 0,
@@ -254,7 +257,18 @@ impl SearchEngine {
                 chunk.positions.clear();
             }
         }
-        Self { chunks, bm25, vector, config, cache, text_store, deleted: HashSet::new(), term_buckets, meta }
+        Self {
+            chunks,
+            bm25,
+            vector,
+            config,
+            cache,
+            text_store,
+            deleted: HashSet::new(),
+            term_buckets,
+            meta,
+            wal_dir: None,
+        }
     }
 
     pub fn search(&self, query: &str) -> SearchResponse {
@@ -447,6 +461,10 @@ impl SearchEngine {
         self.vector.add_chunks(&new_chunks);
         update_term_buckets(&mut self.term_buckets, &new_chunks);
         self.chunks.extend(new_chunks);
+        if let Some(dir) = &self.wal_dir {
+            let store = IndexStore::new(dir);
+            let _ = store.append_wal(&WalOp::Add(docs));
+        }
         self.meta.doc_count = self.chunks.len();
         self.meta.updated_at = IndexStore::now_ts();
         added
@@ -457,6 +475,12 @@ impl SearchEngine {
         for id in ids {
             if self.deleted.insert(id.clone()) {
                 count += 1;
+            }
+        }
+        if count > 0 {
+            if let Some(dir) = &self.wal_dir {
+                let store = IndexStore::new(dir);
+                let _ = store.append_wal(&WalOp::Delete(ids.to_vec()));
             }
         }
         self.meta.deleted_count = self.deleted.len();
@@ -571,7 +595,39 @@ impl SearchEngine {
                 chunk.positions.clear();
             }
         }
-        Ok(Self { chunks, bm25, vector, config, cache, text_store, deleted, term_buckets, meta })
+        let mut engine = Self {
+            chunks,
+            bm25,
+            vector,
+            config,
+            cache,
+            text_store,
+            deleted,
+            term_buckets,
+            meta,
+            wal_dir: Some(dir.to_string()),
+        };
+
+        if engine.config.wal_enabled {
+            let store = IndexStore::new(dir);
+            if let Ok(ops) = store.load_wal() {
+                if !ops.is_empty() {
+                    for op in ops {
+                        match op {
+                            WalOp::Add(docs) => {
+                                let _ = engine.update_documents(docs);
+                            }
+                            WalOp::Delete(ids) => {
+                                let _ = engine.delete_documents(&ids);
+                            }
+                        }
+                    }
+                    let _ = store.clear_wal();
+                }
+            }
+        }
+
+        Ok(engine)
     }
 }
 
