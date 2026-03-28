@@ -93,6 +93,10 @@ pub struct Config {
     pub ann_nprobe: usize,
     pub ann_max_kmeans_iters: usize,
     pub ann_sample_size: usize,
+    pub hnsw_enabled: bool,
+    pub hnsw_m: usize,
+    pub hnsw_ef_construction: usize,
+    pub hnsw_ef_search: usize,
     pub pq_enabled: bool,
     pub pq_m: usize,
     pub pq_k: usize,
@@ -122,6 +126,10 @@ impl Default for Config {
             ann_nprobe: 4,
             ann_max_kmeans_iters: 8,
             ann_sample_size: 5000,
+            hnsw_enabled: false,
+            hnsw_m: 16,
+            hnsw_ef_construction: 128,
+            hnsw_ef_search: 64,
             pq_enabled: false,
             pq_m: 8,
             pq_k: 256,
@@ -194,6 +202,10 @@ impl SearchEngine {
             nprobe: config.ann_nprobe,
             max_iters: config.ann_max_kmeans_iters,
             sample_size: config.ann_sample_size,
+            hnsw_enabled: config.hnsw_enabled,
+            hnsw_m: config.hnsw_m,
+            hnsw_ef_construction: config.hnsw_ef_construction,
+            hnsw_ef_search: config.hnsw_ef_search,
         };
         let pq = PQConfig {
             enabled: config.pq_enabled,
@@ -527,7 +539,7 @@ impl SearchEngine {
             })
             .collect();
         let bm25 = store.load_bm25()?;
-        let vector = store.load_vector()?;
+        let mut vector = store.load_vector()?;
         let cache = Mutex::new(QueryCache::new(config.cache_size));
         let deleted = store.load_deleted().unwrap_or_default().into_iter().collect();
 
@@ -537,6 +549,19 @@ impl SearchEngine {
         };
 
         let term_buckets = build_term_buckets(&bm25);
+
+        let ann = AnnConfig {
+            enabled: config.ann_enabled,
+            nlist: config.ann_nlist,
+            nprobe: config.ann_nprobe,
+            max_iters: config.ann_max_kmeans_iters,
+            sample_size: config.ann_sample_size,
+            hnsw_enabled: config.hnsw_enabled,
+            hnsw_m: config.hnsw_m,
+            hnsw_ef_construction: config.hnsw_ef_construction,
+            hnsw_ef_search: config.hnsw_ef_search,
+        };
+        vector.rebuild_hnsw(&ann);
 
         if config.low_memory {
             for chunk in &mut chunks {

@@ -1,5 +1,6 @@
-﻿use crate::embedding::embed_text;
+use crate::embedding::embed_text;
 use crate::processing::Chunk;
+use hnsw_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -9,6 +10,10 @@ pub struct AnnConfig {
     pub nprobe: usize,
     pub max_iters: usize,
     pub sample_size: usize,
+    pub hnsw_enabled: bool,
+    pub hnsw_m: usize,
+    pub hnsw_ef_construction: usize,
+    pub hnsw_ef_search: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -24,6 +29,11 @@ pub struct PQConfig {
 struct IVFIndex {
     centroids: Vec<Vec<f32>>,
     lists: Vec<Vec<usize>>,
+}
+
+struct HnswIndex {
+    hnsw: Hnsw<f32, DistCosine>,
+    ef_search: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -61,6 +71,7 @@ pub struct VectorIndex {
     ivf: Option<IVFIndex>,
     ann_nprobe: usize,
     pq: Option<PQIndex>,
+    hnsw: Option<HnswIndex>,
 }
 
 impl VectorIndex {
@@ -73,8 +84,9 @@ impl VectorIndex {
         ann: &AnnConfig,
         pq: &PQConfig,
     ) -> Self {
-        let use_ann = ann.enabled && chunks.len() >= ann.nlist.max(1);
-        let use_pq = pq.enabled && dims % pq.m.max(1) == 0;
+        let use_hnsw = ann.hnsw_enabled;
+        let use_ann = ann.enabled && !use_hnsw && chunks.len() >= ann.nlist.max(1);
+        let use_pq = pq.enabled && !use_hnsw && dims % pq.m.max(1) == 0;
         let mut centroids: Vec<Vec<f32>> = Vec::new();
 
         if use_ann {
@@ -87,6 +99,28 @@ impl VectorIndex {
         } else {
             Vec::new()
         };
+
+        if use_hnsw {
+            let mut vectors = Vec::with_capacity(chunks.len());
+            for chunk in chunks {
+                let v = embed_text(&chunk.clean, dims, ngram_min, ngram_max);
+                vectors.push(v);
+            }
+            let hnsw = build_hnsw_index(&vectors, ann.hnsw_m, ann.hnsw_ef_construction, ann.hnsw_ef_search);
+            return Self {
+                dims,
+                ngram_min,
+                ngram_max,
+                quantized: false,
+                vectors_f32: Some(vectors),
+                vectors_i8: None,
+                scales: None,
+                ivf: None,
+                ann_nprobe: ann.nprobe.max(1),
+                pq: None,
+                hnsw: Some(hnsw),
+            };
+        }
 
         if use_pq {
             let sample = sample_vectors(chunks, dims, ngram_min, ngram_max, pq.sample_size);
@@ -119,6 +153,7 @@ impl VectorIndex {
                 ivf,
                 ann_nprobe: ann.nprobe.max(1),
                 pq: Some(pq_index),
+                hnsw: None,
             };
         }
 
@@ -147,6 +182,7 @@ impl VectorIndex {
                 ivf,
                 ann_nprobe: ann.nprobe.max(1),
                 pq: None,
+                hnsw: None,
             }
         } else {
             let mut vectors = Vec::with_capacity(chunks.len());
@@ -170,11 +206,15 @@ impl VectorIndex {
                 ivf,
                 ann_nprobe: ann.nprobe.max(1),
                 pq: None,
+                hnsw: None,
             }
         }
     }
 
     pub fn search(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
+        if self.hnsw.is_some() {
+            return self.search_hnsw(query, top_k);
+        }
         if self.pq.is_some() {
             return self.search_pq(query, top_k);
         }
@@ -195,6 +235,13 @@ impl VectorIndex {
         for (offset, chunk) in chunks.iter().enumerate() {
             let doc_id = base_id + offset;
             let v = embed_text(&chunk.clean, self.dims, self.ngram_min, self.ngram_max);
+            if let Some(hnsw) = &mut self.hnsw {
+                if let Some(store) = &mut self.vectors_f32 {
+                    store.push(v.clone());
+                }
+                let _ = hnsw.hnsw.insert((v, doc_id));
+                continue;
+            }
             if let Some(ivf) = &mut self.ivf {
                 let cid = nearest_centroid(&v, &ivf.centroids);
                 ivf.lists[cid].push(doc_id);
@@ -280,7 +327,24 @@ impl VectorIndex {
             ivf: persist.ivf,
             ann_nprobe: persist.ann_nprobe.max(1),
             pq: persist.pq,
+            hnsw: None,
         }
+    }
+
+    pub fn rebuild_hnsw(&mut self, ann: &AnnConfig) {
+        if !ann.hnsw_enabled {
+            self.hnsw = None;
+            return;
+        }
+        let vectors = match &self.vectors_f32 {
+            Some(v) if !v.is_empty() => v,
+            _ => {
+                self.hnsw = None;
+                return;
+            }
+        };
+        let hnsw = build_hnsw_index(vectors, ann.hnsw_m, ann.hnsw_ef_construction, ann.hnsw_ef_search);
+        self.hnsw = Some(hnsw);
     }
 
     fn search_full(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
@@ -439,6 +503,31 @@ impl VectorIndex {
         results.truncate(top_k);
         results
     }
+
+    fn search_hnsw(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
+        let hnsw = match &self.hnsw {
+            Some(h) => h,
+            None => return Vec::new(),
+        };
+        let vectors = match &self.vectors_f32 {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
+        let q = embed_text(query, self.dims, self.ngram_min, self.ngram_max);
+        let ef = hnsw.ef_search.max(top_k);
+        let neighbors = hnsw.hnsw.search(&q, ef, top_k);
+        let mut results = Vec::with_capacity(neighbors.len());
+        for n in neighbors {
+            let id = n.d_id;
+            if id < vectors.len() {
+                let score = dot(&q, &vectors[id]);
+                results.push((id, score));
+            }
+        }
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(top_k);
+        results
+    }
 }
 
 fn sample_vectors(
@@ -588,6 +677,30 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     total
 }
 
+fn build_hnsw_index(
+    vectors: &[Vec<f32>],
+    m: usize,
+    ef_construction: usize,
+    ef_search: usize,
+) -> HnswIndex {
+    let nb_elem = vectors.len().max(1);
+    let nb_layer = ((nb_elem as f32).ln().max(1.0) as usize) + 1;
+    let mut hnsw = Hnsw::<f32, DistCosine>::new(
+        m.max(4),
+        nb_elem,
+        nb_layer,
+        ef_construction.max(10),
+        42,
+    );
+    for (i, v) in vectors.iter().enumerate() {
+        let _ = hnsw.insert((v.clone(), i));
+    }
+    HnswIndex {
+        hnsw,
+        ef_search: ef_search.max(10),
+    }
+}
+
 fn quantize_vec(v: &[f32]) -> (Vec<i8>, f32) {
     let mut max_abs = 0.0f32;
     for val in v {
@@ -604,3 +717,4 @@ fn quantize_vec(v: &[f32]) -> (Vec<i8>, f32) {
     }
     (out, scale)
 }
+

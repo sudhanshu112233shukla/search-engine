@@ -49,11 +49,13 @@ pub extern "C" fn init_engine_from_file(path: *const c_char) {
     store_path.set_extension("textstore");
     config.text_store_path = Some(store_path.to_string_lossy().to_string());
     config.text_store_mmap = true;
-    config.vector_quantize = true;
-    config.ann_enabled = true;
-    config.pq_enabled = true;
-    config.pq_m = 8;
-    config.pq_k = 256;
+    config.vector_quantize = false;
+    config.ann_enabled = false;
+    config.hnsw_enabled = true;
+    config.hnsw_m = 16;
+    config.hnsw_ef_construction = 128;
+    config.hnsw_ef_search = 64;
+    config.pq_enabled = false;
     config.low_memory = true;
 
     let (head, tail) = split_docs(docs);
@@ -84,11 +86,13 @@ pub extern "C" fn init_engine_from_json(json: *const c_char) {
         None => return,
     };
     let mut config = Config::default();
-    config.vector_quantize = true;
-    config.ann_enabled = true;
-    config.pq_enabled = true;
-    config.pq_m = 8;
-    config.pq_k = 256;
+    config.vector_quantize = false;
+    config.ann_enabled = false;
+    config.hnsw_enabled = true;
+    config.hnsw_m = 16;
+    config.hnsw_ef_construction = 128;
+    config.hnsw_ef_search = 64;
+    config.pq_enabled = false;
     config.low_memory = true;
 
     let (head, tail) = split_docs(docs);
@@ -117,6 +121,10 @@ pub extern "C" fn init_engine_from_index(dir: *const c_char) {
     let mut config = Config::default();
     config.low_memory = true;
     config.text_store_mmap = true;
+    config.hnsw_enabled = true;
+    config.hnsw_m = 16;
+    config.hnsw_ef_construction = 128;
+    config.hnsw_ef_search = 64;
     match SearchEngine::load_index(dir_str.as_ref(), config) {
         Ok(engine) => {
             if !init_engine_once(engine) {
