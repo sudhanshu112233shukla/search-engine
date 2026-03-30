@@ -18,7 +18,7 @@ Most search systems assume connectivity, servers, and cloud compute. This projec
 - ANN acceleration: IVF + PQ and HNSW for large corpora
 - Persistent on-disk index (fast startup, low memory)
 - Memory-mapped vectors for 100K+ to 1M docs
-- Incremental updates with WAL replay (crash-safe)
+- Disk-based BM25 postings (mmap)\r\n- Incremental updates with WAL replay (crash-safe)
 - Offline dataset packs with language + profile selection
 - Android app with Compose + MVVM
 - Evaluation framework (precision@K, recall@K, MRR)
@@ -241,4 +241,5 @@ Metrics:
 ## License
 
 MIT (add a LICENSE file if needed)
+
 

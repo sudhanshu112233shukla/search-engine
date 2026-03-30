@@ -1,4 +1,4 @@
-﻿use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
@@ -108,8 +108,7 @@ pub struct Config {
     pub ranking_weights: RankingWeights,
     pub cache_size: usize,
     pub text_store_path: Option<String>,
-    pub text_store_mmap: bool,
-    pub vector_mmap: bool,
+    pub text_store_mmap: bool,\r\n    pub vector_mmap: bool,\r\n    pub bm25_mmap: bool,
     pub wal_enabled: bool,
 }
 
@@ -143,8 +142,7 @@ impl Default for Config {
             ranking_weights: RankingWeights::default(),
             cache_size: 100,
             text_store_path: None,
-            text_store_mmap: true,
-            vector_mmap: true,
+            text_store_mmap: true,\r\n            vector_mmap: true,\r\n            bm25_mmap: true,
             wal_enabled: true,
         }
     }
@@ -564,7 +562,7 @@ impl SearchEngine {
                 text_len: c.text_len,
             })
             .collect();
-        let bm25 = store.load_bm25()?;
+        let bm25 = store.load_bm25(config.bm25_mmap)?;
         let mut vector = store.load_vector(config.vector_mmap)?;
         let cache = Mutex::new(QueryCache::new(config.cache_size));
         let deleted = store.load_deleted().unwrap_or_default().into_iter().collect();
@@ -895,3 +893,4 @@ pub fn index_health() -> Option<IndexHealth> {
     }
     None
 }
+

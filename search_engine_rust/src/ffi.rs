@@ -1,4 +1,4 @@
-﻿use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString};
 use std::fs;
 use std::path::PathBuf;
 use std::os::raw::c_char;
@@ -48,8 +48,7 @@ pub extern "C" fn init_engine_from_file(path: *const c_char) {
     let mut store_path = PathBuf::from(path_str.as_ref());
     store_path.set_extension("textstore");
     config.text_store_path = Some(store_path.to_string_lossy().to_string());
-    config.text_store_mmap = true;
-    config.vector_mmap = true;
+    config.text_store_mmap = true;\r\n    config.vector_mmap = true;\r\n    config.bm25_mmap = true;
     config.vector_quantize = false;
     config.ann_enabled = false;
     config.hnsw_enabled = true;
@@ -122,8 +121,7 @@ pub extern "C" fn init_engine_from_index(dir: *const c_char) {
     let dir_str = cstr.to_string_lossy();
     let mut config = Config::default();
     config.low_memory = true;
-    config.text_store_mmap = true;
-    config.vector_mmap = true;
+    config.text_store_mmap = true;\r\n    config.vector_mmap = true;\r\n    config.bm25_mmap = true;
     config.hnsw_enabled = true;
     config.hnsw_m = 16;
     config.hnsw_ef_construction = 128;
@@ -291,3 +289,4 @@ mod jni_bridge {
         out.into_raw()
     }
 }
+
