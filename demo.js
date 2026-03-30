@@ -15,3 +15,4 @@ result.results.forEach((r, i) => {
 });
 console.log(`Answer: ${result.answer}`);
 console.log(`Confidence: ${result.confidence.toFixed(2)}`);
+

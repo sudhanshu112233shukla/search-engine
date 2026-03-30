@@ -34,15 +34,8 @@ function search(query) {
     return { id: r.id, text: doc ? doc.text : '', score: r.score };
   });
 
-  const answerPick = extractBestSentence(query, results);
-  const confidence = Math.min(1, answerPick.score || 0);
-
-  return {
-    query,
-    results,
-    answer: answerPick.sentence || '',
-    confidence,
-  };
+  const answerPick = extractBestSentence(query, results);\n  const confidence = Math.min(1, answerPick.score || 0);\n\n  return {\n    query,\n    results,\n    answer: answerPick.sentence || '',\n    answerSource: answerPick.sourceId || null,\n    answerScore: answerPick.score || 0,\n    confidence,\n  };
 }
 
 module.exports = { search };
+

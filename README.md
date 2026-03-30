@@ -61,38 +61,26 @@ search-engine/
 
 ---
 
-## Quickstart
 
-### Option A: Android App (recommended)
+## Node Demo (CLI + API)
 
-1. Build Rust libraries
-```bash
-cd search_engine_rust
-cargo build --release --target aarch64-linux-android
-cargo build --release --target armv7-linux-androideabi
+### CLI
+```
+cd search-engine
+npm install
+node demo.js "what is bm25"
 ```
 
-2. Copy `.so` files
+### API
 ```
-search_engine_rust/target/aarch64-linux-android/release/libsearch_engine_rust.so
-search_engine_rust/target/armv7-linux-androideabi/release/libsearch_engine_rust.so
+cd search-engine
+npm install
+node src/server.js
 ```
-To:
+Then open:
 ```
-android_app/app/src/main/jniLibs/arm64-v8a/
-android_app/app/src/main/jniLibs/armeabi-v7a/
+http://localhost:3001/search?q=what%20is%20bm25
 ```
-
-3. Open `android_app/` in Android Studio and run.
-
-### Option B: Rust CLI
-
-```bash
-cd search_engine_rust
-cargo run -- build-index --dataset data/index/dataset.json --out data/index_store
-cargo run -- load-index --dir data/index_store
-```
-
 ---
 
 ## Offline Packs (Language + Profile)
@@ -242,6 +230,7 @@ Metrics:
 ## License
 
 MIT (add a LICENSE file if needed)
+
 
 
 
