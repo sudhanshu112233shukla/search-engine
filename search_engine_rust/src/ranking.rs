@@ -1,5 +1,5 @@
 use crate::processing::Chunk;
-use crate::utils::{normalize_text, tokenize, tokenize_with_positions};
+use crate::utils::{normalize_text, tokenize, tokenize_with_positions, QueryIntent};
 
 #[derive(Clone, Debug)]
 pub struct Ranked {
@@ -36,6 +36,30 @@ impl Default for RankingWeights {
             proximity: 0.4,
         }
     }
+}
+
+pub fn adjust_weights_for_intent(base: &RankingWeights, intent: QueryIntent) -> RankingWeights {
+    let mut w = base.clone();
+    match intent {
+        QueryIntent::Factual => {
+            w.bm25 *= 1.15;
+            w.exact *= 1.2;
+            w.phrase *= 1.1;
+            w.semantic *= 0.9;
+        }
+        QueryIntent::List => {
+            w.bm25 *= 1.1;
+            w.semantic *= 1.1;
+            w.proximity *= 0.9;
+        }
+        QueryIntent::Comparison => {
+            w.phrase *= 1.2;
+            w.proximity *= 1.2;
+            w.semantic *= 1.05;
+        }
+        QueryIntent::Other => {}
+    }
+    w
 }
 
 fn min_max_norm(scores: &std::collections::HashMap<usize, f32>) -> std::collections::HashMap<usize, f32> {

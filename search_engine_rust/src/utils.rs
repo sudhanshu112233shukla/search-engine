@@ -48,6 +48,14 @@ pub enum Lang {
     Other,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueryIntent {
+    Factual,
+    List,
+    Comparison,
+    Other,
+}
+
 pub fn detect_language(text: &str) -> Lang {
     for c in text.chars() {
         if ('\u{0900}'..='\u{097F}').contains(&c) {
@@ -95,31 +103,28 @@ fn is_stopword_lang(token: &str, lang: Lang) -> bool {
 }
 
 pub fn tokenize(text: &str) -> Vec<String> {
-    let normalized = normalize_text(text);
-    normalized
-        .split_whitespace()
-        .map(|s| stem_token(s))
-        .filter(|t| !is_stopword(t))
-        .collect()
+    let lang = detect_language(text);
+    tokenize_with_lang(text, lang)
 }
 
 pub fn tokenize_with_lang(text: &str, lang: Lang) -> Vec<String> {
     let normalized = normalize_text(text);
     normalized
         .split_whitespace()
-        .map(|s| stem_token(s))
+        .map(|s| stem_token_lang(s, lang))
         .filter(|t| !is_stopword_lang(t, lang))
         .collect()
 }
 
 pub fn tokenize_with_positions(text: &str) -> (Vec<String>, HashMap<String, Vec<usize>>) {
     let normalized = normalize_text(text);
+    let lang = detect_language(text);
     let mut tokens = Vec::new();
     let mut positions: HashMap<String, Vec<usize>> = HashMap::new();
 
     for (idx, raw) in normalized.split_whitespace().enumerate() {
-        let token = stem_token(raw);
-        if is_stopword(&token) {
+        let token = stem_token_lang(raw, lang);
+        if is_stopword_lang(&token, lang) {
             continue;
         }
         tokens.push(token.clone());
@@ -160,6 +165,51 @@ pub fn process_query(query: &str) -> Vec<String> {
         }
     }
     expanded
+}
+
+pub fn detect_intent(query: &str, lang: Lang) -> QueryIntent {
+    let q = normalize_text(query);
+    let tokens: Vec<&str> = q.split_whitespace().collect();
+    let has = |w: &str| tokens.iter().any(|t| *t == w);
+
+    match lang {
+        Lang::En => {
+            if has("vs") || has("versus") || has("compare") || has("difference") || has("better") {
+                return QueryIntent::Comparison;
+            }
+            if has("list") || has("examples") || has("types") || has("top") || has("best") {
+                return QueryIntent::List;
+            }
+            if has("what") || has("when") || has("where") || has("who") || has("why") || has("how") || has("define") || has("meaning") {
+                return QueryIntent::Factual;
+            }
+        }
+        Lang::Es => {
+            if has("vs") || has("versus") || has("comparar") || has("diferencia") || has("mejor") {
+                return QueryIntent::Comparison;
+            }
+            if has("lista") || has("ejemplos") || has("tipos") || has("mejores") {
+                return QueryIntent::List;
+            }
+            if has("que") || has("cuando") || has("donde") || has("quien") || has("por") || has("como") {
+                return QueryIntent::Factual;
+            }
+        }
+        Lang::Hi => {
+            if has("बनाम") || has("तुलना") || has("अंतर") {
+                return QueryIntent::Comparison;
+            }
+            if has("सूची") || has("उदाहरण") || has("प्रकार") {
+                return QueryIntent::List;
+            }
+            if has("क्या") || has("कब") || has("कहाँ") || has("कौन") || has("क्यों") || has("कैसे") {
+                return QueryIntent::Factual;
+            }
+        }
+        Lang::Other => {}
+    }
+
+    QueryIntent::Other
 }
 
 pub fn split_sentences(text: &str) -> Vec<String> {
@@ -216,12 +266,33 @@ fn highlight_terms(text: &str, tokens: &[String]) -> String {
     out.trim().to_string()
 }
 
-fn stem_token(token: &str) -> String {
+fn stem_token_lang(token: &str, lang: Lang) -> String {
+    match lang {
+        Lang::En => stem_en(token),
+        Lang::Es => stem_es(token),
+        Lang::Hi => token.to_string(),
+        Lang::Other => token.to_string(),
+    }
+}
+
+fn stem_en(token: &str) -> String {
     if !token.is_ascii() {
         return token.to_string();
     }
     let mut t = token.to_string();
     for suf in ["ing", "edly", "ed", "ly", "es", "s"] {
+        if t.len() > suf.len() + 2 && t.ends_with(suf) {
+            t.truncate(t.len() - suf.len());
+            break;
+        }
+    }
+    t
+}
+
+fn stem_es(token: &str) -> String {
+    let mut t = token.to_string();
+    let suffixes = ["mente", "aciones", "acion", "adoras", "adores", "ancia", "mente", "amiento", "amientos", "idades", "idad", "icos", "icas", "ico", "ica", "es", "os", "as", "s"];
+    for suf in suffixes {
         if t.len() > suf.len() + 2 && t.ends_with(suf) {
             t.truncate(t.len() - suf.len());
             break;

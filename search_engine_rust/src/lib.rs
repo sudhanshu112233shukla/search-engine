@@ -18,10 +18,10 @@ use processing::{process_documents, Chunk};
 use bm25::BM25Index;
 use vector::{AnnConfig, PQConfig, VectorIndex};
 use retrieval::retrieve;
-use ranking::{rank_candidates, RankingWeights, Ranked};
+use ranking::{adjust_weights_for_intent, rank_candidates, RankingWeights, Ranked};
 use extraction::extract_answers;
 use confidence::compute_confidence;
-use utils::{detect_language, expand_tokens, make_snippet, normalize_text, tokenize_with_lang, Lang};
+use utils::{detect_intent, detect_language, expand_tokens, make_snippet, normalize_text, tokenize_with_lang, Lang};
 use text_store::TextStore;
 use index_store::{IndexMeta, IndexStore, WalOp};
 
@@ -295,6 +295,9 @@ impl SearchEngine {
         let expanded_tokens = expand_tokens(&base_tokens, lang);
         let clean_query = normalize_text(query);
 
+        let intent = detect_intent(query, lang);
+        let tuned_weights = adjust_weights_for_intent(&self.config.ranking_weights, intent);
+
         let (bm25_results, vector_results) = retrieve(
             &self.bm25,
             &self.vector,
@@ -309,7 +312,7 @@ impl SearchEngine {
             &self.chunks,
             &base_tokens,
             &clean_query,
-            &self.config.ranking_weights,
+            &tuned_weights,
         );
 
         let ranked: Vec<Ranked> = ranked
@@ -376,9 +379,12 @@ impl SearchEngine {
     }
 
     pub fn rank_debug(&self, query: &str) -> (Vec<Ranked>, Vec<(String, f32, crate::ranking::ScoreBreakdown)>) {
-        let base_tokens = tokenize_with_lang(query, detect_language(query));
-        let expanded_tokens = expand_tokens(&base_tokens, detect_language(query));
+        let lang = detect_language(query);
+        let base_tokens = tokenize_with_lang(query, lang);
+        let expanded_tokens = expand_tokens(&base_tokens, lang);
         let clean_query = normalize_text(query);
+        let intent = detect_intent(query, lang);
+        let tuned_weights = adjust_weights_for_intent(&self.config.ranking_weights, intent);
 
         let (bm25_results, vector_results) = retrieve(
             &self.bm25,
@@ -394,7 +400,7 @@ impl SearchEngine {
             &self.chunks,
             &base_tokens,
             &clean_query,
-            &self.config.ranking_weights,
+            &tuned_weights,
         );
 
         let breakdowns = ranked.iter().map(|r| {

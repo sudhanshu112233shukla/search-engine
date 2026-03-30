@@ -15,6 +15,7 @@ Most search systems assume connectivity, servers, and cloud compute. This projec
 - Hybrid retrieval: BM25 keyword + semantic similarity
 - Multi-signal ranking: exact match, phrase match, proximity
 - Exact answer extraction with confidence
+- Query intent tuning (factual, list, comparison)
 - ANN acceleration: IVF + PQ and HNSW for large corpora
 - Persistent on-disk index (fast startup, low memory)
 - Memory-mapped vectors for 100K+ to 1M docs
@@ -241,5 +242,6 @@ Metrics:
 ## License
 
 MIT (add a LICENSE file if needed)
+
 
 
