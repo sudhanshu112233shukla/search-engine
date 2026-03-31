@@ -40,11 +40,11 @@ mod index_store;
 mod bundle;
 mod datasets;
 mod ffi;
-mod evaluation;
+pub mod evaluation;
 mod crawler;
 mod processor;
 mod storage;
-mod cli;
+pub mod cli;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SearchResponse {
@@ -108,7 +108,9 @@ pub struct Config {
     pub ranking_weights: RankingWeights,
     pub cache_size: usize,
     pub text_store_path: Option<String>,
-    pub text_store_mmap: bool,\r\n    pub vector_mmap: bool,\r\n    pub bm25_mmap: bool,
+    pub text_store_mmap: bool,
+    pub vector_mmap: bool,
+    pub bm25_mmap: bool,
     pub wal_enabled: bool,
 }
 
@@ -142,7 +144,9 @@ impl Default for Config {
             ranking_weights: RankingWeights::default(),
             cache_size: 100,
             text_store_path: None,
-            text_store_mmap: true,\r\n            vector_mmap: true,\r\n            bm25_mmap: true,
+            text_store_mmap: true,
+            vector_mmap: true,
+            bm25_mmap: true,
             wal_enabled: true,
         }
     }
@@ -574,7 +578,7 @@ impl SearchEngine {
         let deleted = store.load_deleted().unwrap_or_default().into_iter().collect();
 
         let text_store = match meta.text_store_file {
-            Some(path) => TextStore::open(Path::new(&path), config.text_store_mmap).ok(),
+            Some(ref path) => TextStore::open(Path::new(path), config.text_store_mmap).ok(),
             None => None,
         };
 
@@ -635,7 +639,6 @@ impl SearchEngine {
     }
 }
 
-#[derive(Debug)]
 pub struct ShardedEngine {
     shards: Vec<SearchEngine>,
     results_top_k: usize,
@@ -719,7 +722,6 @@ impl ShardedEngine {
     }
 }
 
-#[derive(Debug)]
 pub enum EngineInstance {
     Single(SearchEngine),
     Sharded(ShardedEngine),
@@ -789,7 +791,7 @@ pub fn load_engine_from_dir(dir: &str, config: Config) -> std::io::Result<Engine
 fn build_term_buckets(bm25: &BM25Index) -> HashMap<(String, usize), Vec<String>> {
     let mut buckets: HashMap<(String, usize), Vec<String>> = HashMap::new();
     for term in bm25.terms_iter() {
-        let key = term.chars().next().map(|c| c.to_string()).unwrap_or_default();
+        let key: String = term.chars().next().map(|c| c.to_string()).unwrap_or_default();
         let len = term.len();
         buckets.entry((key, len)).or_default().push(term.clone());
     }
@@ -899,4 +901,5 @@ pub fn index_health() -> Option<IndexHealth> {
     }
     None
 }
+
 

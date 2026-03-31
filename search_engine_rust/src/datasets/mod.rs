@@ -16,7 +16,8 @@ pub fn import_wikipedia(dump_path: &str, out_path: &str, limit: Option<usize>) -
         Box::new(File::open(dump_path)?)
     };
 
-    let mut xml = Reader::from_reader(reader);
+    let buf_reader = BufReader::new(reader);
+    let mut xml = Reader::from_reader(buf_reader);
     xml.trim_text(true);
     let mut buf = Vec::new();
 
@@ -119,36 +120,48 @@ pub fn import_osm_pbf(pbf_path: &str, out_path: &str, limit: Option<usize>) -> i
         }
         match element {
             Element::Node(node) => {
-                let name = node.tags().get("name").cloned();
-                if name.is_none() {
-                    return;
-                }
+                let mut name: Option<String> = None;
                 let mut parts = Vec::new();
-                parts.push(name.unwrap());
                 for (k, v) in node.tags() {
+                    if k == "name" {
+                        name = Some(v.to_string());
+                    }
                     if k.starts_with("addr:") || k == "amenity" || k == "place" || k == "shop" {
                         parts.push(format!("{}={}", k, v));
                     }
                 }
-                let doc = Document { id: format!("osm:node:{}", node.id()), text: parts.join(" ") };
-                let _ = writeln!(out, "{}", serde_json::to_string(&doc).unwrap_or_else(|_| "{}".to_string()));
-                count += 1;
+                if let Some(n) = name {
+                    if parts.is_empty() {
+                        parts.push(n.clone());
+                    } else {
+                        parts.insert(0, n.clone());
+                    }
+                    let doc = Document { id: format!("osm:node:{}", node.id()), text: parts.join(" ") };
+                    let _ = writeln!(out, "{}", serde_json::to_string(&doc).unwrap_or_else(|_| "{}".to_string()));
+                    count += 1;
+                }
             }
             Element::Way(way) => {
-                let name = way.tags().get("name").cloned();
-                if name.is_none() {
-                    return;
-                }
+                let mut name: Option<String> = None;
                 let mut parts = Vec::new();
-                parts.push(name.unwrap());
                 for (k, v) in way.tags() {
+                    if k == "name" {
+                        name = Some(v.to_string());
+                    }
                     if k.starts_with("addr:") || k == "amenity" || k == "place" || k == "shop" {
                         parts.push(format!("{}={}", k, v));
                     }
                 }
-                let doc = Document { id: format!("osm:way:{}", way.id()), text: parts.join(" ") };
-                let _ = writeln!(out, "{}", serde_json::to_string(&doc).unwrap_or_else(|_| "{}".to_string()));
-                count += 1;
+                if let Some(n) = name {
+                    if parts.is_empty() {
+                        parts.push(n.clone());
+                    } else {
+                        parts.insert(0, n.clone());
+                    }
+                    let doc = Document { id: format!("osm:way:{}", way.id()), text: parts.join(" ") };
+                    let _ = writeln!(out, "{}", serde_json::to_string(&doc).unwrap_or_else(|_| "{}".to_string()));
+                    count += 1;
+                }
             }
             _ => {}
         }

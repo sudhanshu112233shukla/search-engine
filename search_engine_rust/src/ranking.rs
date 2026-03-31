@@ -1,5 +1,5 @@
 use crate::processing::Chunk;
-use crate::utils::{normalize_text, tokenize, tokenize_with_positions, QueryIntent};
+use crate::utils::{tokenize, tokenize_with_positions, QueryIntent};
 
 #[derive(Clone, Debug)]
 pub struct Ranked {

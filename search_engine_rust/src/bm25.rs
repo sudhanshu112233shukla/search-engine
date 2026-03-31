@@ -29,7 +29,7 @@ pub struct BM25Persist {
     pub total_len: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct BM25Index {
     pub terms: HashMap<String, TermEntry>,
     pub delta_terms: HashMap<String, Vec<(u32, u32)>>,
@@ -38,7 +38,7 @@ pub struct BM25Index {
     pub k1: f32,
     pub b: f32,
     pub total_len: usize,
-    postings_mmap: Option<Mmap>,
+    pub(crate) postings_mmap: Option<Mmap>,
 }
 
 impl BM25Index {
@@ -272,4 +272,6 @@ fn postings_from_mmap(mmap: &Mmap, offset: u64, len: u32) -> Vec<(u32, u32)> {
     }
     out
 }
+
+
 

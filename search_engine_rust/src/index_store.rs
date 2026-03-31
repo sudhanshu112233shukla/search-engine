@@ -104,6 +104,8 @@ impl IndexStore {
             let postings = bm25.collect_postings(&term);
             let len = postings.len() as u32;
             for (doc_id, tf) in &postings {
+                let doc_id: u32 = *doc_id;
+                let tf: u32 = *tf;
                 postings_file.write_all(&doc_id.to_le_bytes())?;
                 postings_file.write_all(&tf.to_le_bytes())?;
             }
@@ -148,7 +150,11 @@ impl IndexStore {
                     let postings = postings_from_raw(&buf, entry.offset, entry.len);
                     entry.postings = Some(postings);
                     entry.offset = 0;
-                    entry.len = entry.postings.as_ref().map(|p| p.len()).unwrap_or(0) as u32;
+                    entry.len = entry
+                        .postings
+                        .as_ref()
+                        .map(|p: &Vec<(u32, u32)>| p.len())
+                        .unwrap_or(0) as u32;
                 }
             }
             return Ok(bm25);
@@ -314,7 +320,7 @@ fn postings_from_raw(buf: &[u8], offset: u64, len: u32) -> Vec<(u32, u32)> {
     out
 }
 
-fn write_bin<P: AsRef<Path>, T: Serialize>(path: P, value: &T) -> io::Result<()> {
+fn write_bin<P: AsRef<Path>, T: Serialize + ?Sized>(path: P, value: &T) -> io::Result<()> {
     let data = bincode::serialize(value).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     let mut file = fs::File::create(path)?;
     file.write_all(&data)?;

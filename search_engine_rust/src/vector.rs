@@ -33,7 +33,7 @@ struct IVFIndex {
 }
 
 struct HnswIndex {
-    hnsw: Hnsw<f32, DistCosine>,
+    hnsw: Hnsw<'static, f32, DistCosine>,
     ef_search: usize,
 }
 
@@ -64,7 +64,6 @@ struct PQIndex {
     codes: Vec<u8>,
 }
 
-#[derive(Clone, Debug)]
 pub struct VectorIndex {
     pub dims: usize,
     pub ngram_min: usize,
@@ -268,7 +267,7 @@ impl VectorIndex {
                 if let Some(store) = &mut self.vectors_f32 {
                     store.push(v.clone());
                 }
-                let _ = hnsw.hnsw.insert((v, doc_id));
+                let _ = hnsw.hnsw.insert((&v, doc_id));
                 continue;
             }
             if let Some(ivf) = &mut self.ivf {
@@ -276,7 +275,9 @@ impl VectorIndex {
                 ivf.lists[cid].push(doc_id);
             }
             if let Some(pq) = &mut self.pq {
-                encode_pq(&v, pq, &mut pq.codes);
+                let mut tmp = Vec::with_capacity(pq.m);
+                encode_pq(&v, pq, &mut tmp);
+                pq.codes.extend_from_slice(&tmp);
                 continue;
             }
             if self.quantized {
@@ -565,7 +566,7 @@ impl VectorIndex {
         };
         let q = embed_text(query, self.dims, self.ngram_min, self.ngram_max);
         let ef = hnsw.ef_search.max(top_k);
-        let neighbors = hnsw.hnsw.search(&q, ef, top_k);
+        let neighbors = hnsw.hnsw.search(&q, top_k, ef);
         let mut results = Vec::with_capacity(neighbors.len());
         for n in neighbors {
             let id = n.d_id;
@@ -735,15 +736,15 @@ fn build_hnsw_index(
 ) -> HnswIndex {
     let nb_elem = vectors.len().max(1);
     let nb_layer = ((nb_elem as f32).ln().max(1.0) as usize) + 1;
-    let mut hnsw = Hnsw::<f32, DistCosine>::new(
+    let mut hnsw: Hnsw<'static, f32, DistCosine> = Hnsw::new(
         m.max(4),
         nb_elem,
         nb_layer,
         ef_construction.max(10),
-        42,
+        DistCosine,
     );
     for (i, v) in vectors.iter().enumerate() {
-        let _ = hnsw.insert((v.clone(), i));
+        let _ = hnsw.insert((v.as_slice(), i));
     }
     HnswIndex {
         hnsw,

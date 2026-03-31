@@ -10,8 +10,7 @@ const DATA_PATH = path.join(__dirname, '..', 'data', 'docs.json');
 let cached = null;
 
 function loadDocs() {
-  const raw = fs.readFileSync(DATA_PATH, 'utf8');
-  return JSON.parse(raw);
+  const target = fs.existsSync(DATA_PATH_LARGE) ? DATA_PATH_LARGE : DATA_PATH;\n  const raw = fs.readFileSync(target, 'utf8');\n  return JSON.parse(raw);
 }
 
 function getEngine() {
@@ -34,7 +33,17 @@ function search(query) {
     return { id: r.id, text: doc ? doc.text : '', score: r.score };
   });
 
-  const answerPick = extractBestSentence(query, results);\n  const confidence = Math.min(1, answerPick.score || 0);\n\n  return {\n    query,\n    results,\n    answer: answerPick.sentence || '',\n    answerSource: answerPick.sourceId || null,\n    answerScore: answerPick.score || 0,\n    confidence,\n  };
+  const answerPick = extractBestSentence(query, results);
+  const confidence = Math.min(1, answerPick.score || 0);
+
+  return {
+    query,
+    results,
+    answer: answerPick.sentence || '',
+    answerSource: answerPick.sourceId || null,
+    answerScore: answerPick.score || 0,
+    confidence,
+  };
 }
 
 module.exports = { search };
