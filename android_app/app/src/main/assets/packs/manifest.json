@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "download_base": "https://github.com/sudhanshu112233shukla/search-engine/releases/download/SEARCHENG1",
+  "languages": [
+    {
+      "code": "en",
+      "profiles": [
+        {
+          "name": "default",
+          "max_bytes": 1000000000
+        },
+        {
+          "name": "power",
+          "max_bytes": 8194546259
+        }
+      ],
+      "shards": [
+        {
+          "name": "shard_0000",
+          "path": "data/packs\\en\\shard_0000",
+          "docs": 50000,
+          "bytes": 2255083048
+        },
+        {
+          "name": "shard_0001",
+          "path": "data/packs\\en\\shard_0001",
+          "docs": 50000,
+          "bytes": 1063927247
+        },
+        {
+          "name": "shard_0002",
+          "path": "data/packs\\en\\shard_0002",
+          "docs": 50000,
+          "bytes": 1292423123
+        },
+        {
+          "name": "shard_0003",
+          "path": "data/packs\\en\\shard_0003",
+          "docs": 50000,
+          "bytes": 1074758157
+        },
+        {
+          "name": "shard_0004",
+          "path": "data/packs\\en\\shard_0004",
+          "docs": 50000,
+          "bytes": 8542477
+        },
+        {
+          "name": "shard_0005",
+          "path": "data/packs\\en\\shard_0005",
+          "docs": 50000,
+          "bytes": 7273106
+        },
+        {
+          "name": "shard_0006",
+          "path": "data/packs\\en\\shard_0006",
+          "docs": 50000,
+          "bytes": 450399756
+        },
+        {
+          "name": "shard_0007",
+          "path": "data/packs\\en\\shard_0007",
+          "docs": 38212,
+          "bytes": 2042139345
+        }
+      ]
+    }
+  ]
+}
+
