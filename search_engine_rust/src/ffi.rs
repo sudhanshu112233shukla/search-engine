@@ -26,10 +26,10 @@ fn parse_docs(json: &str) -> Option<Vec<Document>> {
 }
 
 #[no_mangle]
-pub extern "C" fn init_engine_from_file(path: *const c_char) {
+pub extern "C" fn init_engine_from_file(path: *const c_char) -> bool {
     if path.is_null() {
         eprintln!("[ffi] init_engine_from_file: null path");
-        return;
+        return false;
     }
     let cstr = unsafe { CStr::from_ptr(path) };
     let path_str = cstr.to_string_lossy();
@@ -37,12 +37,12 @@ pub extern "C" fn init_engine_from_file(path: *const c_char) {
         Ok(s) => s,
         Err(err) => {
             eprintln!("[ffi] file read error: {err}");
-            return;
+            return false;
         }
     };
     let docs = match parse_docs(&data) {
         Some(d) => d,
-        None => return,
+        None => return false,
     };
     let mut config = Config::default();
     let mut store_path = PathBuf::from(path_str.as_ref());
@@ -64,7 +64,7 @@ pub extern "C" fn init_engine_from_file(path: *const c_char) {
     let engine = SearchEngine::new(head, config);
     if !init_engine_once(engine) {
         eprintln!("[ffi] engine already initialized; skipping");
-        return;
+        return false;
     }
     if !tail.is_empty() {
         std::thread::spawn(move || {
@@ -73,19 +73,20 @@ pub extern "C" fn init_engine_from_file(path: *const c_char) {
             }
         });
     }
+    true
 }
 
 #[no_mangle]
-pub extern "C" fn init_engine_from_json(json: *const c_char) {
+pub extern "C" fn init_engine_from_json(json: *const c_char) -> bool {
     if json.is_null() {
         eprintln!("[ffi] init_engine_from_json: null input");
-        return;
+        return false;
     }
     let cstr = unsafe { CStr::from_ptr(json) };
     let json_str = cstr.to_string_lossy();
     let docs = match parse_docs(json_str.as_ref()) {
         Some(d) => d,
-        None => return,
+        None => return false,
     };
     let mut config = Config::default();
     config.vector_quantize = false;
@@ -102,7 +103,7 @@ pub extern "C" fn init_engine_from_json(json: *const c_char) {
     let engine = SearchEngine::new(head, config);
     if !init_engine_once(engine) {
         eprintln!("[ffi] engine already initialized; skipping");
-        return;
+        return false;
     }
     if !tail.is_empty() {
         std::thread::spawn(move || {
@@ -111,16 +112,21 @@ pub extern "C" fn init_engine_from_json(json: *const c_char) {
             }
         });
     }
+    true
 }
 
 #[no_mangle]
-pub extern "C" fn init_engine_from_index(dir: *const c_char) {
+pub extern "C" fn init_engine_from_index(dir: *const c_char) -> bool {
     if dir.is_null() {
         eprintln!("[ffi] init_engine_from_index: null dir");
-        return;
+        return false;
     }
     let cstr = unsafe { CStr::from_ptr(dir) };
     let dir_str = cstr.to_string_lossy();
+    if !std::path::Path::new(dir_str.as_ref()).exists() {
+        eprintln!("[ffi] init_engine_from_index: dir does not exist");
+        return false;
+    }
     let mut config = Config::default();
     config.low_memory = true;
     config.text_store_mmap = true;
@@ -134,10 +140,13 @@ pub extern "C" fn init_engine_from_index(dir: *const c_char) {
         Ok(engine) => {
             if !init_engine_instance_once(engine) {
                 eprintln!("[ffi] engine already initialized; skipping");
+                return false;
             }
+            true
         }
         Err(err) => {
             eprintln!("[ffi] load index failed: {err}");
+            false
         }
     }
 }
@@ -222,7 +231,7 @@ pub extern "C" fn free_string(ptr: *mut c_char) {
 mod jni_bridge {
     use super::{init_engine_from_file, init_engine_from_index, search_query, free_string};
     use jni::objects::{JClass, JString};
-    use jni::sys::jstring;
+    use jni::sys::{jboolean, jstring};
     use jni::JNIEnv;
     use std::ffi::CString;
 
@@ -231,14 +240,15 @@ mod jni_bridge {
         env: JNIEnv,
         _class: JClass,
         path: JString,
-    ) {
+    ) -> jboolean {
         let path_str = match env.get_string(&path) {
             Ok(s) => s.into(),
             Err(_) => "".to_string(),
         };
         if let Ok(c_path) = CString::new(path_str) {
-            init_engine_from_file(c_path.as_ptr());
+            return if init_engine_from_file(c_path.as_ptr()) { 1 } else { 0 };
         }
+        0
     }
 
     #[no_mangle]
@@ -246,14 +256,15 @@ mod jni_bridge {
         env: JNIEnv,
         _class: JClass,
         path: JString,
-    ) {
+    ) -> jboolean {
         let path_str = match env.get_string(&path) {
             Ok(s) => s.into(),
             Err(_) => "".to_string(),
         };
         if let Ok(c_path) = CString::new(path_str) {
-            init_engine_from_index(c_path.as_ptr());
+            return if init_engine_from_index(c_path.as_ptr()) { 1 } else { 0 };
         }
+        0
     }
 
     #[no_mangle]

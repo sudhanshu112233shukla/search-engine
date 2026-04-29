@@ -312,6 +312,10 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(12.dp))
         Text("Clear search history", modifier = Modifier.clickable { onClearHistory() })
         Spacer(modifier = Modifier.height(16.dp))
+        Text("Device activation", style = MaterialTheme.typography.titleSmall)
+        Text("Device public key (share with pack builder):", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+        Text(state.devicePublicKey, style = MaterialTheme.typography.bodySmall)
+        Spacer(modifier = Modifier.height(16.dp))
         Text("Offline bundle", style = MaterialTheme.typography.titleSmall)
         if (state.bundleAvailable) {
             Text("Language: ${state.bundleLanguage}")

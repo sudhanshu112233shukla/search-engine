@@ -38,7 +38,8 @@ data class SearchUiState(
     val availableLanguages: List<String> = emptyList(),
     val downloading: Boolean = false,
     val downloadProgress: Float = 0f,
-    val downloadMessage: String = ""
+    val downloadMessage: String = "",
+    val devicePublicKey: String = ""
 )
 
 class SearchViewModel(private val appContext: Context) : ViewModel() {
@@ -54,6 +55,8 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
 
     fun initIfNeeded(datasetPath: String) {
         if (initialized.compareAndSet(false, true)) {
+            SecurePackCrypto.ensureDeviceWrapKeyPair()
+            val deviceKey = SecurePackCrypto.devicePublicKeyBase64()
             val history = historyStore.load()
             val profile = bundlePrefs.getProfile()
             val language = bundlePrefs.getLanguage()
@@ -75,7 +78,8 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                     bundleProfile = profile,
                     bundleLanguage = language,
                     bundleAvailable = bundleAvailable,
-                    availableLanguages = langs
+                    availableLanguages = langs,
+                    devicePublicKey = deviceKey
                 )
             }
 
@@ -98,7 +102,6 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                         } else {
                             NativeSearchEngine.init(datasetPath)
                         }
-                        true
                     }.getOrDefault(false)
                 }
                 progressJob?.cancel()
@@ -200,8 +203,14 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
         }
         viewModelScope.launch(Dispatchers.IO) {
             _state.update { it.copy(downloading = true, downloadProgress = 0f, downloadMessage = "Starting download") }
-            val ok = DownloadManager.downloadPack(appContext, manifest, language, profile) { progress, msg ->
-                _state.update { it.copy(downloadProgress = progress, downloadMessage = msg) }
+            val ok = if (manifest.version >= 2) {
+                SecureDownloadManager.downloadEncryptedPack(appContext, manifest, language, profile) { progress, msg ->
+                    _state.update { it.copy(downloadProgress = progress, downloadMessage = msg) }
+                }
+            } else {
+                DownloadManager.downloadPack(appContext, manifest, language, profile) { progress, msg ->
+                    _state.update { it.copy(downloadProgress = progress, downloadMessage = msg) }
+                }
             }
             _state.update { it.copy(downloading = false, downloadProgress = if (ok) 1f else it.downloadProgress, downloadMessage = if (ok) "Download complete" else "Download failed") }
         }
