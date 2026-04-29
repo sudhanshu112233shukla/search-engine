@@ -1,19 +1,19 @@
 # Secure Packs (Encrypted + Signed + Device-Bound)
 
-This repo supports a "secure pack" (`.spack`) format intended for distributing large offline indexes (multi‑GB) while:
+This repo supports a "secure pack" (`.spack`) format intended for distributing large offline indexes (multi-GB) while:
 
-- encrypting data at rest (AES‑256‑GCM),
+- encrypting data at rest (AES-256-GCM),
 - verifying authenticity/integrity (Ed25519 signature),
-- binding packs to a specific device (RSA‑OAEP wrapped data key; private key lives in Android Keystore),
+- binding packs to a specific device (RSA-OAEP wrapped data key; private key lives in Android Keystore),
 - staying fully offline after one-time activation (device key generation + pack download/install).
 
-Important: This **does not** make exfiltration impossible against a determined attacker (the device must be able to decrypt to search). It *does* prevent casual copying/sharing of packs and ensures only trusted packs load.
+Important: this **does not** make exfiltration impossible against a determined attacker (the device must decrypt to search). It does prevent casual copying/sharing of packs and ensures only trusted packs load.
 
 ## Android Overview
 
-- The app creates a **non‑exportable** RSA private key in Android Keystore on first run.
-- The app exposes the **public key** (base64 X.509 DER) in Settings → "Device activation".
-- Packs are encrypted with a random 32‑byte data key (DEK). The DEK is wrapped with the device public key (RSA‑OAEP‑SHA256) and embedded in the `.spack` header.
+- The app creates a **non-exportable** RSA private key in Android Keystore on first run.
+- The app exposes the **public key** (base64 X.509 DER) in Settings -> "Device activation".
+- Packs are encrypted with a random 32-byte data key (DEK). The DEK is wrapped with the device public key (RSA-OAEP-SHA256) and embedded in the `.spack` header.
 - The app downloads:
   - `${download_base}/{lang}/{shard}.spack`
   - `${download_base}/{lang}/{shard}.spack.sig`
@@ -39,11 +39,30 @@ Signature (`.spack.sig`) is:
 
 To enable secure downloads, set `manifest.json` `version` to `2` (or higher). The app uses secure downloads when `version >= 2`.
 
-## Example Workflow
+## GitHub Releases Hosting
+
+GitHub Releases assets are flat filenames (no folders). The Android downloader detects a Releases URL when `download_base` contains `/releases/download/`.
+
+For secure packs hosted on GitHub Releases:
+
+- Upload assets named:
+  - `{lang}_shard_XXXX.spack`
+  - `{lang}_shard_XXXX.spack.sig`
+- Set `download_base` to:
+  - `https://github.com/<owner>/<repo>/releases/download/<tag>`
+
+Example:
+
+- `.../releases/download/demo-pack-v1/en_shard_0000.spack`
+- `.../releases/download/demo-pack-v1/en_shard_0000.spack.sig`
+
+Important: because packs are device-bound, you typically cannot publish one `.spack` to all users. Each user/device needs its own `.spack` encrypted with their device public key (or you must remove device-binding).
+
+## Example Workflow (Per-Device Secure Pack)
 
 ### 1) On Android (one-time activation)
 
-- Open the app → Settings → copy the **Device public key**.
+- Open the app -> Settings -> copy the **Device public key**.
 
 ### 2) On your build machine (pack builder)
 
@@ -59,8 +78,8 @@ node scripts/secure_pack/encrypt_spack.js \
 ```
 
 3. Upload:
-   - `shard_0000.spack`
-   - `shard_0000.spack.sig`
+   - `en_shard_0000.spack`
+   - `en_shard_0000.spack.sig`
 
 ### 3) In the app
 
@@ -86,3 +105,4 @@ To get base64 SPKI DER for `TRUSTED_PACK_PUBKEY_SPKI_DER_B64`:
 ```bash
 node -e "const fs=require('fs');const crypto=require('crypto');const k=crypto.createPublicKey(fs.readFileSync('signing_ed25519_public.pem'));const der=k.export({format:'der',type:'spki'});console.log(der.toString('base64'));"
 ```
+

@@ -79,6 +79,13 @@ Example:
 
 Each zip should unzip into a folder named `shard_0000/` containing the shard files.
 
+### GitHub Releases Note (Flat Filenames)
+
+If you host zip shards on GitHub Releases, assets must be flat filenames (no folders). Set:
+
+- `download_base` to: `https://github.com/<owner>/<repo>/releases/download/<tag>`
+- Asset names to: `{lang}_{shard_name}.zip` (example: `en_shard_0000.zip`)
+
 ## Export Zip Shards (Rust)
 
 From `search_engine_rust/`:
@@ -108,6 +115,8 @@ Large packs should not be committed to git. For a public demo:
 
 For GitHub Releases specifically, keep each asset under GitHub's per-file limit.
 If a shard zip is too large, reduce `--max-docs` during `pack` or build a smaller demo corpus.
+
+If you need encrypted + signed + device-bound packs (`.spack`), see `docs/SECURE_PACKS.md` (note: device-binding usually requires per-user/per-device pack builds).
 
 Scripted demo build:
 
