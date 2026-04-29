@@ -24,7 +24,13 @@ object DownloadManager {
         packRoot.mkdirs()
 
         for (shard in shards) {
-            val url = "${base.trimEnd('/')}/${language}/${shard.name}.zip"
+            val baseTrimmed = base.trimEnd('/')
+            val url = if (baseTrimmed.contains("/releases/download/")) {
+                // GitHub Releases assets are flat filenames (no subfolders).
+                "${baseTrimmed}/${language}_${shard.name}.zip"
+            } else {
+                "${baseTrimmed}/${language}/${shard.name}.zip"
+            }
             onProgress(downloaded.toFloat() / totalBytes, "Downloading ${shard.name}")
             val ok = downloadAndUnzip(url, File(packRoot, shard.name))
             if (!ok) return false

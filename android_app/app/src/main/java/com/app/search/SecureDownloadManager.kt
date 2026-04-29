@@ -24,8 +24,17 @@ object SecureDownloadManager {
         packRoot.mkdirs()
 
         for (shard in shards) {
-            val packUrl = "${base.trimEnd('/')}/${language}/${shard.name}.spack"
-            val sigUrl = "${base.trimEnd('/')}/${language}/${shard.name}.spack.sig"
+            val baseTrimmed = base.trimEnd('/')
+            val (packUrl, sigUrl) = if (baseTrimmed.contains("/releases/download/")) {
+                val name = "${language}_${shard.name}.spack"
+                val sig = "${language}_${shard.name}.spack.sig"
+                Pair("${baseTrimmed}/${name}", "${baseTrimmed}/${sig}")
+            } else {
+                Pair(
+                    "${baseTrimmed}/${language}/${shard.name}.spack",
+                    "${baseTrimmed}/${language}/${shard.name}.spack.sig"
+                )
+            }
             val outDir = File(packRoot, shard.name)
             val tmpOutDir = File(packRoot, "${shard.name}.tmp")
             val tmpFile = File(packRoot, "${shard.name}.spack.tmp")
