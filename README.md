@@ -19,7 +19,8 @@ Most search systems assume connectivity, servers, and cloud compute. This projec
 - ANN acceleration: IVF + PQ and HNSW for large corpora
 - Persistent on-disk index (fast startup, low memory)
 - Memory-mapped vectors for 100K+ to 1M docs
-- Disk-based BM25 postings (mmap)\r\n- Incremental updates with WAL replay (crash-safe)
+- Disk-based BM25 postings (mmap)
+- Incremental updates with WAL replay (crash-safe)
 - Offline dataset packs with language + profile selection
 - Android app with Compose + MVVM
 - Evaluation framework (precision@K, recall@K, MRR)
@@ -107,6 +108,49 @@ Android uses:
 - Assets fallback if no download exists
 
 ---
+
+## Demo Pack (Shareable)
+
+For a public demo, do not commit pack files to git (they are large). Instead:
+
+1. Use the release pack already prepared for this repo:
+
+```text
+SEARCHENG1
+```
+
+2. Upload these assets to the GitHub Release tag `SEARCHENG1`:
+
+```text
+search_engine_rust/dist/packs_release_deflate/manifest.json
+search_engine_rust/dist/packs_release_deflate/en_shard_0000.zip
+search_engine_rust/dist/packs_release_deflate/en_shard_0001.zip
+search_engine_rust/dist/packs_release_deflate/en_shard_0002.zip
+search_engine_rust/dist/packs_release_deflate/en_shard_0003.zip
+search_engine_rust/dist/packs_release_deflate/en_shard_0004.zip
+search_engine_rust/dist/packs_release_deflate/en_shard_0005.zip
+search_engine_rust/dist/packs_release_deflate/en_shard_0006.zip
+search_engine_rust/dist/packs_release_deflate/en_shard_0007.zip
+```
+
+3. The Android app is already pointed at that release base URL and will fetch the pack from Settings using the `power` profile.
+
+4. Validate the pack locally before publishing:
+
+```bash
+cd search_engine_rust
+cargo run --release -- validate-pack --dir data/packs/en --smoke-query "what is google"
+```
+
+If you want to rebuild the release assets from the current corpus:
+
+```bash
+cargo run --release -- export-packs --in data/packs --out dist/packs_release_deflate --method deflate --download-base https://github.com/sudhanshu112233shukla/search-engine/releases/download/SEARCHENG1
+```
+
+Android can then download the pack in-app (Settings: language/profile). After download, restart the app once so it reloads the installed pack.
+
+Details: `docs/PACKS.md`.
 
 ## Ingestion Pipeline
 
