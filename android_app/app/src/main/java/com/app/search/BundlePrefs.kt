@@ -6,7 +6,7 @@ import android.content.SharedPreferences
 class BundlePrefs(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("bundle_prefs", Context.MODE_PRIVATE)
 
-    fun getProfile(): String = prefs.getString("profile", "default") ?: "default"
+    fun getProfile(): String = prefs.getString("profile", "power") ?: "power"
 
     fun setProfile(profile: String) {
         prefs.edit().putString("profile", profile).apply()

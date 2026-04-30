@@ -87,6 +87,20 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             .fillMaxSize()
             .padding(16.dp)
     ) {
+        if (!state.packInstalled && state.bundleAvailable) {
+            DemoBanner(
+                title = "Full demo pack not installed",
+                body = "The app can run from the built-in sample right now, but the full offline pack is available for download."
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        } else if (state.packInstalled) {
+            DemoBanner(
+                title = "Offline pack ready",
+                body = "The full pack is installed locally and the engine can search offline."
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         TopAppBar(
             title = { Text("Offline Search") },
             actions = {
@@ -126,6 +140,8 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             IndexingBanner("Building local index…", state.indexingProgress)
         } else if (!state.engineReady) {
             IndexingBanner("Search engine not ready", 0f)
+        } else if (!state.packInstalled && state.bundleAvailable) {
+            IndexingBanner("Sample mode active. Download the full pack for complete offline coverage.", 0f)
         }
 
         if (state.query.isBlank()) {
@@ -173,6 +189,21 @@ fun IndexingBanner(text: String, progress: Float) {
         }
     }
     Spacer(modifier = Modifier.height(8.dp))
+}
+
+@Composable
+fun DemoBanner(title: String, body: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(body, style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 @Composable
@@ -331,13 +362,16 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(8.dp))
             Text("Profile: ${state.bundleProfile}")
             RowItem("default (1GB)") { onProfile("default") }
-            RowItem("power (5GB)") { onProfile("power") }
+            RowItem("power (full demo)") { onProfile("power") }
             Spacer(modifier = Modifier.height(8.dp))
             RowItem(if (state.downloading) "Downloading..." else "Download pack") { onDownload() }
             if (state.downloading) {
                 Spacer(modifier = Modifier.height(6.dp))
                 LinearProgressIndicator(progress = { state.downloadProgress }, modifier = Modifier.fillMaxWidth())
                 Text(state.downloadMessage, style = MaterialTheme.typography.bodySmall)
+            } else if (state.packInstalled) {
+                Text("Pack installed locally", style = MaterialTheme.typography.bodySmall)
+                Text("Restart after downloading to switch to the pack.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             }
         } else {
             Text("No bundle manifest found in assets")

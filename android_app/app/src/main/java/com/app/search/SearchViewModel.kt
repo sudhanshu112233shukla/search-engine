@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 
@@ -35,6 +36,7 @@ data class SearchUiState(
     val bundleProfile: String = "default",
     val bundleLanguage: String = "en",
     val bundleAvailable: Boolean = false,
+    val packInstalled: Boolean = false,
     val availableLanguages: List<String> = emptyList(),
     val downloading: Boolean = false,
     val downloadProgress: Float = 0f,
@@ -63,6 +65,7 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
             val bundleManifest = BundleManager.loadManifest(appContext)
             val bundleAvailable = bundleManifest != null
             val langs = bundleManifest?.let { BundleManager.languages(it) } ?: emptyList()
+            val packInstalled = File(appContext.filesDir, "packs_download/$language/$profile").exists()
             val datasetSize = FileSize.formatMb(datasetPath)
             val textStorePath = datasetPath.replace(Regex("\\.[^.]+"), ".textstore")
             val textStoreSize = FileSize.formatMb(textStorePath)
@@ -78,6 +81,7 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                     bundleProfile = profile,
                     bundleLanguage = language,
                     bundleAvailable = bundleAvailable,
+                    packInstalled = packInstalled,
                     availableLanguages = langs,
                     devicePublicKey = deviceKey
                 )
@@ -204,7 +208,7 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             _state.update { it.copy(downloading = true, downloadProgress = 0f, downloadMessage = "Starting download") }
             val ok = if (manifest.version >= 2) {
-                SecureDownloadManager.downloadEncryptedPack(appContext, manifest, language, profile) { progress, msg ->
+                SecureDownloadManager.downloadEncryptedPack(appContext, manifest, language, profile) { progress, msg -> 
                     _state.update { it.copy(downloadProgress = progress, downloadMessage = msg) }
                 }
             } else {
@@ -212,7 +216,14 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                     _state.update { it.copy(downloadProgress = progress, downloadMessage = msg) }
                 }
             }
-            _state.update { it.copy(downloading = false, downloadProgress = if (ok) 1f else it.downloadProgress, downloadMessage = if (ok) "Download complete" else "Download failed") }
+            _state.update {
+                it.copy(
+                    downloading = false,
+                    downloadProgress = if (ok) 1f else it.downloadProgress,
+                    downloadMessage = if (ok) "Download complete. Restart app to use the pack." else "Download failed",
+                    packInstalled = if (ok) true else it.packInstalled
+                )
+            }
         }
     }
 }
