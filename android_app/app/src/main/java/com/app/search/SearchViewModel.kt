@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -129,6 +130,10 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
             _state.update { it.copy(loading = false, answer = null, answers = emptyList(), results = emptyList()) }
             return
         }
+        if (query.trim().length < 2) {
+            _state.update { it.copy(loading = false, error = "Type at least 2 characters") }
+            return
+        }
         if (!_state.value.engineReady) {
             _state.update { it.copy(loading = false, error = "Indexing data... please wait") }
             return
@@ -142,24 +147,54 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
             _state.update { it.copy(loading = true) }
             val start = System.currentTimeMillis()
             val response = withContext(Dispatchers.Default) {
-                val json = NativeSearchEngine.search(query)
-                SearchParser.parse(json)
+                withTimeoutOrNull(8000L) {
+                    val json = NativeSearchEngine.search(query)
+                    SearchParser.parse(json)
+                }
             }
             val elapsed = System.currentTimeMillis() - start
+
+            if (response == null) {
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        answer = null,
+                        answers = emptyList(),
+                        results = emptyList(),
+                        error = "Search timed out. Try a shorter query."
+                    )
+                }
+                return@launch
+            }
 
             if (response.results.isNotEmpty()) {
                 historyStore.add(query)
             }
             val history = historyStore.load()
+            val bestResult = response.results.firstOrNull()
+            val fallbackText = response.answer?.text
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: bestResult?.text
+                    ?.trim()
+                    ?.replace(Regex("\\s+"), " ")
+                    ?.take(220)
 
             _state.update {
+                val fallbackAnswer = fallbackText?.let {
+                    Answer(
+                        text = it,
+                        confidence = response.answer?.confidence ?: 0.35f,
+                        source = response.answer?.source ?: bestResult?.id.orEmpty()
+                    )
+                }
                 it.copy(
                     loading = false,
-                    answer = response.answer,
+                    answer = fallbackAnswer,
                     answers = response.answers,
                     results = response.results,
                     history = history,
-                    error = if (response.results.isEmpty()) "No results found" else null,
+                    error = if (response.results.isEmpty() && fallbackAnswer == null) "No results found" else null,
                     slowQuery = elapsed > 200
                 )
             }

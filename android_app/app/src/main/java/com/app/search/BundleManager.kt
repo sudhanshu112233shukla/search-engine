@@ -105,6 +105,9 @@ object BundleManager {
             selected.add(shard)
             total += shard.bytes
         }
+        if (selected.isEmpty() && lang.shards.isNotEmpty()) {
+            selected.add(lang.shards.first())
+        }
         return selected
     }
 }

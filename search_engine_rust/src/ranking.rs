@@ -1,5 +1,5 @@
 use crate::processing::Chunk;
-use crate::utils::{tokenize, tokenize_with_positions, QueryIntent};
+use crate::utils::{normalize_text, split_sentences, tokenize, tokenize_with_positions, QueryIntent};
 
 #[derive(Clone, Debug)]
 pub struct Ranked {
@@ -155,6 +155,81 @@ fn proximity_score(chunk: &Chunk, query_tokens: &[String]) -> f32 {
     if best == usize::MAX { 0.0 } else { 1.0 / (1.0 + best as f32) }
 }
 
+fn lead_boost(chunk: &Chunk, query_tokens: &[String], intent: QueryIntent) -> f32 {
+    if query_tokens.is_empty() {
+        return 0.0;
+    }
+    let source = if !chunk.clean.is_empty() {
+        chunk.clean.clone()
+    } else {
+        chunk.text.clone()
+    };
+    if source.is_empty() {
+        return 0.0;
+    }
+
+    let first_sentence = split_sentences(&source).into_iter().next().unwrap_or_default();
+    if first_sentence.is_empty() {
+        return 0.0;
+    }
+
+    let clean_first = normalize_text(&first_sentence);
+    let mut boost = 0.0f32;
+    let overlap = query_tokens
+        .iter()
+        .filter(|t| clean_first.contains(t.as_str()))
+        .count() as f32
+        / query_tokens.len().max(1) as f32;
+
+    if matches!(intent, QueryIntent::Factual) {
+        boost += overlap * 0.45;
+        if clean_first.contains(" is ")
+            || clean_first.contains(" are ")
+            || clean_first.contains(" was ")
+            || clean_first.contains(" were ")
+            || clean_first.contains(" refers to ")
+            || clean_first.contains(" means ")
+        {
+            boost += 0.25;
+        }
+    } else {
+        boost += overlap * 0.2;
+    }
+    boost
+}
+
+fn title_boost(chunk: &Chunk, query_tokens: &[String], intent: QueryIntent) -> f32 {
+    if query_tokens.is_empty() {
+        return 0.0;
+    }
+    let source = if !chunk.clean.is_empty() { chunk.clean.as_str() } else { chunk.text.as_str() };
+    if source.is_empty() {
+        return 0.0;
+    }
+    let title_line = source.lines().next().unwrap_or_default();
+    if title_line.is_empty() {
+        return 0.0;
+    }
+    let clean_title = normalize_text(title_line);
+    if clean_title.is_empty() {
+        return 0.0;
+    }
+
+    let exact = if clean_title == query_tokens.join(" ") { 1.0 } else { 0.0 };
+    let starts = if query_tokens.iter().all(|t| clean_title.starts_with(t)) { 1.0 } else { 0.0 };
+    let overlap = query_tokens
+        .iter()
+        .filter(|t| clean_title.contains(t.as_str()))
+        .count() as f32
+        / query_tokens.len().max(1) as f32;
+
+    let mut boost = overlap * 0.25 + starts * 0.35 + exact * 0.75;
+    if matches!(intent, QueryIntent::Factual) {
+        boost *= 1.4;
+    }
+    boost
+}
+
 pub fn rank_candidates(
     bm25_results: &[(usize, f32)],
     vector_results: &[(usize, f32)],
@@ -162,6 +237,7 @@ pub fn rank_candidates(
     query_tokens: &[String],
     clean_query: &str,
     weights: &RankingWeights,
+    intent: QueryIntent,
 ) -> Vec<Ranked> {
     let mut bm25_map: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
     let mut vec_map: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
@@ -192,14 +268,18 @@ pub fn rank_candidates(
         };
         let phrase = phrase_match(&token_view, query_tokens);
         let proximity = proximity_score(chunk, query_tokens);
+        let lead = lead_boost(chunk, query_tokens, intent);
+        let title = title_boost(chunk, query_tokens, intent);
 
         let bm25_c = weights.bm25 * bm25_norm.get(&doc_id).copied().unwrap_or(0.0);
         let sem_c = weights.semantic * vec_norm.get(&doc_id).copied().unwrap_or(0.0);
         let exact_c = weights.exact * exact;
         let phrase_c = weights.phrase * phrase;
         let prox_c = weights.proximity * proximity;
+        let lead_c = if matches!(intent, QueryIntent::Factual) { lead } else { lead * 0.5 };
+        let title_c = title;
 
-        let score = bm25_c + sem_c + exact_c + phrase_c + prox_c;
+        let score = bm25_c + sem_c + exact_c + phrase_c + prox_c + lead_c + title_c;
 
         ranked.push(Ranked {
             doc_id,
@@ -209,7 +289,7 @@ pub fn rank_candidates(
                 semantic: sem_c,
                 exact: exact_c,
                 phrase: phrase_c,
-                proximity: prox_c,
+                proximity: prox_c + lead_c + title_c,
             },
         });
     }

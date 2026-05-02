@@ -171,6 +171,15 @@ pub fn detect_intent(query: &str, lang: Lang) -> QueryIntent {
     let q = normalize_text(query);
     let tokens: Vec<&str> = q.split_whitespace().collect();
     let has = |w: &str| tokens.iter().any(|t| *t == w);
+    let content_tokens = tokens
+        .iter()
+        .filter(|t| {
+            !matches!(
+                **t,
+                "a" | "an" | "the" | "of" | "to" | "in" | "on" | "for" | "and" | "or" | "what" | "who" | "where" | "when" | "why" | "how" | "is" | "are" | "was" | "were"
+            )
+        })
+        .count();
 
     match lang {
         Lang::En => {
@@ -181,6 +190,9 @@ pub fn detect_intent(query: &str, lang: Lang) -> QueryIntent {
                 return QueryIntent::List;
             }
             if has("what") || has("when") || has("where") || has("who") || has("why") || has("how") || has("define") || has("meaning") {
+                return QueryIntent::Factual;
+            }
+            if content_tokens > 0 && tokens.len() <= 3 {
                 return QueryIntent::Factual;
             }
         }
@@ -194,6 +206,9 @@ pub fn detect_intent(query: &str, lang: Lang) -> QueryIntent {
             if has("que") || has("cuando") || has("donde") || has("quien") || has("por") || has("como") {
                 return QueryIntent::Factual;
             }
+            if content_tokens > 0 && tokens.len() <= 3 {
+                return QueryIntent::Factual;
+            }
         }
         Lang::Hi => {
             if has("बनाम") || has("तुलना") || has("अंतर") {
@@ -205,10 +220,16 @@ pub fn detect_intent(query: &str, lang: Lang) -> QueryIntent {
             if has("क्या") || has("कब") || has("कहाँ") || has("कौन") || has("क्यों") || has("कैसे") {
                 return QueryIntent::Factual;
             }
+            if content_tokens > 0 && tokens.len() <= 3 {
+                return QueryIntent::Factual;
+            }
         }
         Lang::Other => {}
     }
 
+    if content_tokens > 0 && tokens.len() <= 3 {
+        return QueryIntent::Factual;
+    }
     QueryIntent::Other
 }
 

@@ -2,7 +2,7 @@
 use std::io::{self, BufRead, BufReader, Read, Write};
 
 use bzip2::read::BzDecoder;
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use scraper::{Html, Selector};
@@ -172,7 +172,7 @@ pub fn import_osm_pbf(pbf_path: &str, out_path: &str, limit: Option<usize>) -> i
 
 pub fn import_warc(warc_path: &str, out_path: &str, limit: Option<usize>) -> io::Result<usize> {
     let reader: Box<dyn Read> = if warc_path.ends_with(".gz") {
-        Box::new(GzDecoder::new(File::open(warc_path)?))
+        Box::new(MultiGzDecoder::new(File::open(warc_path)?))
     } else {
         Box::new(File::open(warc_path)?)
     };
@@ -314,28 +314,33 @@ fn read_warc_record<R: BufRead>(reader: &mut R) -> io::Result<Option<WarcRecord>
         let key = parts[0].trim();
         let val = parts[1].trim();
         match key.to_lowercase().as_str() {
-            "warc-type" => warc_type = val.to_string(),
+            "warc-type" => warc_type = val.to_lowercase(),
             "warc-target-uri" => target_uri = val.to_string(),
             "content-length" => content_length = val.parse().unwrap_or(0),
             _ => {}
         }
     }
 
-    if content_length == 0 {
-        return Ok(None);
+    let mut body = Vec::new();
+    if content_length > 0 {
+        body.resize(content_length, 0u8);
+        reader.read_exact(&mut body)?;
     }
 
-    let mut body = vec![0u8; content_length];
-    reader.read_exact(&mut body)?;
     Ok(Some(WarcRecord { warc_type, target_uri, content_length, body }))
 }
 
 fn split_http_body(body: &[u8], target_uri: &str) -> Option<(String, String)> {
     let text = String::from_utf8_lossy(body);
-    let parts: Vec<&str> = text.splitn(2, "\r\n\r\n").collect();
-    if parts.len() < 2 { return None; }
-    let html = parts[1];
+    let mut parts: Vec<&str> = text.splitn(2, "\r\n\r\n").collect();
+    if parts.len() < 2 {
+        parts = text.splitn(2, "\n\n").collect();
+    }
     let url = if target_uri.is_empty() { "unknown".to_string() } else { target_uri.to_string() };
+    if parts.len() < 2 {
+        return Some((url, text.to_string()));
+    }
+    let html = parts[1];
     Some((url, html.to_string()))
 }
 
@@ -349,6 +354,11 @@ fn html_to_doc(url: &str, html: &str, title_sel: &Selector, body_sel: &Selector)
     let mut text = String::new();
     if let Some(body) = doc.select(body_sel).next() {
         for t in body.text() {
+            text.push_str(t);
+            text.push(' ');
+        }
+    } else {
+        for t in doc.root_element().text() {
             text.push_str(t);
             text.push(' ');
         }

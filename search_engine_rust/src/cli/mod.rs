@@ -1,4 +1,5 @@
-﻿use std::fs;
+use std::fs;
+use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
 use crate::bundle::{BundleManifest, BundleProfile, LanguagePack, ShardInfo, dir_size, shard_dir};
@@ -165,41 +166,114 @@ fn build_index_from_dataset(dataset: &str, out: &str) {
 }
 
 fn pack_dataset(dataset: &str, out: &str, max_docs: usize, lang: &str, download_base: Option<String>) {
-    let docs = std::fs::read_to_string(dataset).unwrap_or_else(|_| "[]".to_string());
-    let parsed = serde_json::from_str::<Vec<Document>>(&docs).unwrap_or_default();
-    if parsed.is_empty() {
-        eprintln!("No documents loaded from dataset");
-        return;
+    fn stream_json_array<R: std::io::Read, F: FnMut(Document)>(reader: R, mut on_doc: F) -> Result<(), serde_json::Error> {
+        struct DocVisitor<F>(F);
+        impl<'de, F: FnMut(Document)> serde::de::Visitor<'de> for DocVisitor<F> {
+            type Value = ();
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "array of documents")
+            }
+            fn visit_seq<A>(mut self, mut seq: A) -> Result<(), A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                while let Some(doc) = seq.next_element::<Document>()? {
+                    (self.0)(doc);
+                }
+                Ok(())
+            }
+        }
+        let mut de = serde_json::Deserializer::from_reader(reader);
+        serde::de::Deserializer::deserialize_any(&mut de, DocVisitor(on_doc))
     }
+
     let out_root = Path::new(out).join(lang);
     let mut shards = Vec::new();
-    let mut start = 0usize;
     let mut index = 0usize;
-    while start < parsed.len() {
-        let end = (start + max_docs).min(parsed.len());
-        let slice = parsed[start..end].to_vec();
-        let shard_path = shard_dir(&out_root, index);
-        let shard_str = shard_path.to_string_lossy().to_string();
-        let mut cfg = Config::default();
-        cfg.vector_quantize = true;
-        cfg.ann_enabled = true;
-        cfg.pq_enabled = true;
-        cfg.text_store_path = Some(format!("{}/textstore.bin", shard_str));
-        cfg.low_memory = true;
-        let engine = SearchEngine::new(slice.clone(), cfg);
-        if let Err(err) = engine.save_index(&shard_str) {
-            eprintln!("Failed to save shard: {err}");
+    let mut buffer: Vec<Document> = Vec::with_capacity(max_docs);
+
+    let file = match fs::File::open(dataset) {
+        Ok(f) => f,
+        Err(err) => {
+            eprintln!("Failed to open dataset: {err}");
             return;
         }
-        let bytes = dir_size(&shard_path);
-        shards.push(ShardInfo {
-            name: format!("shard_{:04}", index),
-            path: shard_path.to_string_lossy().to_string(),
-            docs: slice.len(),
-            bytes,
+    };
+    let mut reader = BufReader::new(file);
+
+    let mut first_byte = None;
+    {
+        let mut buf = Vec::new();
+        if reader.read_until(b'\n', &mut buf).is_ok() {
+            for b in &buf {
+                if !b.is_ascii_whitespace() {
+                    first_byte = Some(*b);
+                    break;
+                }
+            }
+        }
+    }
+
+    let file = match fs::File::open(dataset) {
+        Ok(f) => f,
+        Err(err) => {
+            eprintln!("Failed to reopen dataset: {err}");
+            return;
+        }
+    };
+    reader = BufReader::new(file);
+
+    let is_json_array = matches!(first_byte, Some(b'['));
+
+    if is_json_array {
+        let result = stream_json_array(reader, |doc| {
+            buffer.push(doc);
+            if buffer.len() >= max_docs {
+                if !flush_shard(&out_root, index, &buffer, &mut shards) {
+                    buffer.clear();
+                    return;
+                }
+                buffer.clear();
+                index += 1;
+            }
         });
-        start = end;
-        index += 1;
+        if result.is_err() {
+            eprintln!("Failed to parse JSON array dataset");
+            return;
+        }
+    } else {
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+            let doc = match serde_json::from_str::<Document>(&line) {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+            buffer.push(doc);
+            if buffer.len() >= max_docs {
+                if !flush_shard(&out_root, index, &buffer, &mut shards) {
+                    return;
+                }
+                buffer.clear();
+                index += 1;
+            }
+        }
+    }
+
+    if !buffer.is_empty() {
+        if !flush_shard(&out_root, index, &buffer, &mut shards) {
+            return;
+        }
+    }
+
+    if shards.is_empty() {
+        eprintln!("No documents loaded from dataset");
+        return;
     }
 
     let manifest_path = Path::new(out).join("manifest.json");
@@ -231,4 +305,33 @@ fn pack_dataset(dataset: &str, out: &str, max_docs: usize, lang: &str, download_
     }
 
     let _ = manifest.save(&manifest_path);
+}
+
+
+
+fn flush_shard(out_root: &Path, index: usize, docs: &[Document], shards: &mut Vec<ShardInfo>) -> bool {
+    if docs.is_empty() {
+        return true;
+    }
+    let shard_path = shard_dir(out_root, index);
+    let shard_str = shard_path.to_string_lossy().to_string();
+    let mut cfg = Config::default();
+    cfg.vector_quantize = true;
+    cfg.ann_enabled = true;
+    cfg.pq_enabled = true;
+    cfg.text_store_path = Some(format!("{}/textstore.bin", shard_str));
+    cfg.low_memory = true;
+    let engine = SearchEngine::new(docs.to_vec(), cfg);
+    if let Err(err) = engine.save_index(&shard_str) {
+        eprintln!("Failed to save shard: {err}");
+        return false;
+    }
+    let bytes = dir_size(&shard_path);
+    shards.push(ShardInfo {
+        name: format!("shard_{:04}", index),
+        path: shard_path.to_string_lossy().to_string(),
+        docs: docs.len(),
+        bytes,
+    });
+    true
 }

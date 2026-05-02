@@ -51,9 +51,10 @@ pub extern "C" fn init_engine_from_file(path: *const c_char) -> bool {
     config.text_store_mmap = true;
     config.vector_mmap = true;
     config.bm25_mmap = true;
+    config.vector_enabled = false;
     config.vector_quantize = false;
     config.ann_enabled = false;
-    config.hnsw_enabled = true;
+    config.hnsw_enabled = false;
     config.hnsw_m = 16;
     config.hnsw_ef_construction = 128;
     config.hnsw_ef_search = 64;
@@ -91,13 +92,14 @@ pub extern "C" fn init_engine_from_json(json: *const c_char) -> bool {
     let mut config = Config::default();
     config.vector_quantize = false;
     config.ann_enabled = false;
-    config.hnsw_enabled = true;
+    config.hnsw_enabled = false;
     config.hnsw_m = 16;
     config.hnsw_ef_construction = 128;
     config.hnsw_ef_search = 64;
     config.pq_enabled = false;
     config.low_memory = true;
     config.vector_mmap = true;
+    config.vector_enabled = false;
 
     let (head, tail) = split_docs(docs);
     let engine = SearchEngine::new(head, config);
@@ -132,7 +134,8 @@ pub extern "C" fn init_engine_from_index(dir: *const c_char) -> bool {
     config.text_store_mmap = true;
     config.vector_mmap = true;
     config.bm25_mmap = true;
-    config.hnsw_enabled = true;
+    config.vector_enabled = false;
+    config.hnsw_enabled = false;
     config.hnsw_m = 16;
     config.hnsw_ef_construction = 128;
     config.hnsw_ef_search = 64;
@@ -237,7 +240,7 @@ mod jni_bridge {
 
     #[no_mangle]
     pub extern "system" fn Java_com_app_search_NativeSearchEngine_init(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         path: JString,
     ) -> jboolean {
@@ -253,7 +256,7 @@ mod jni_bridge {
 
     #[no_mangle]
     pub extern "system" fn Java_com_app_search_NativeSearchEngine_initIndex(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         path: JString,
     ) -> jboolean {
@@ -269,7 +272,7 @@ mod jni_bridge {
 
     #[no_mangle]
     pub extern "system" fn Java_com_app_search_NativeSearchEngine_update(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         path: JString,
     ) {
@@ -284,7 +287,7 @@ mod jni_bridge {
 
     #[no_mangle]
     pub extern "system" fn Java_com_app_search_NativeSearchEngine_search(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         query: JString,
     ) -> jstring {

@@ -103,6 +103,22 @@ impl VectorI8Store {
 }
 
 impl VectorIndex {
+    pub fn empty(dims: usize, ngram_min: usize, ngram_max: usize) -> Self {
+        Self {
+            dims,
+            ngram_min,
+            ngram_max,
+            quantized: false,
+            vectors_f32: None,
+            vectors_i8: None,
+            scales: None,
+            ivf: None,
+            ann_nprobe: 1,
+            pq: None,
+            hnsw: None,
+        }
+    }
+
     pub fn build(
         chunks: &[Chunk],
         dims: usize,

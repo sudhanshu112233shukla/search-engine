@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 
@@ -21,7 +21,7 @@ use retrieval::retrieve;
 use ranking::{adjust_weights_for_intent, rank_candidates, RankingWeights, Ranked};
 use extraction::extract_answers;
 use confidence::compute_confidence;
-use utils::{detect_intent, detect_language, expand_tokens, make_snippet, normalize_text, tokenize_with_lang, Lang};
+use utils::{detect_intent, detect_language, expand_tokens, make_snippet, normalize_text, tokenize_with_lang, Lang, QueryIntent};
 use text_store::TextStore;
 use index_store::{IndexMeta, IndexStore, WalOp};
 
@@ -111,6 +111,7 @@ pub struct Config {
     pub text_store_mmap: bool,
     pub vector_mmap: bool,
     pub bm25_mmap: bool,
+    pub vector_enabled: bool,
     pub wal_enabled: bool,
 }
 
@@ -147,6 +148,7 @@ impl Default for Config {
             text_store_mmap: true,
             vector_mmap: true,
             bm25_mmap: true,
+            vector_enabled: true,
             wal_enabled: true,
         }
     }
@@ -302,12 +304,19 @@ impl SearchEngine {
         let intent = detect_intent(query, lang);
         let tuned_weights = adjust_weights_for_intent(&self.config.ranking_weights, intent);
 
+        let retrieval_top_k = match intent {
+            QueryIntent::Factual => self.config.retrieval_top_k.max(150),
+            QueryIntent::List => self.config.retrieval_top_k.max(100),
+            QueryIntent::Comparison => self.config.retrieval_top_k.max(100),
+            QueryIntent::Other => self.config.retrieval_top_k,
+        };
+
         let (bm25_results, vector_results) = retrieve(
             &self.bm25,
             &self.vector,
             &expanded_tokens,
             query,
-            self.config.retrieval_top_k,
+            retrieval_top_k,
         );
 
         let ranked = rank_candidates(
@@ -317,6 +326,7 @@ impl SearchEngine {
             &base_tokens,
             &clean_query,
             &tuned_weights,
+            intent,
         );
 
         let ranked: Vec<Ranked> = ranked
@@ -356,11 +366,15 @@ impl SearchEngine {
             })
             .collect();
 
-        let answer = answers.first().cloned();
-        if let Some(top) = answer.as_ref() {
-            if top.confidence > 0.5 {
-                answers.truncate(1);
-            }
+        let answer = answers.first().cloned().or_else(|| {
+            results.first().map(|item| Answer {
+                text: item.text.clone(),
+                confidence: 0.35,
+                source: item.id.clone(),
+            })
+        });
+        if answer.is_some() {
+            answers.truncate(1);
         }
 
         SearchResponse { answer, answers, results }
@@ -390,12 +404,19 @@ impl SearchEngine {
         let intent = detect_intent(query, lang);
         let tuned_weights = adjust_weights_for_intent(&self.config.ranking_weights, intent);
 
+        let retrieval_top_k = match intent {
+            QueryIntent::Factual => self.config.retrieval_top_k.max(150),
+            QueryIntent::List => self.config.retrieval_top_k.max(100),
+            QueryIntent::Comparison => self.config.retrieval_top_k.max(100),
+            QueryIntent::Other => self.config.retrieval_top_k,
+        };
+
         let (bm25_results, vector_results) = retrieve(
             &self.bm25,
             &self.vector,
             &expanded_tokens,
             query,
-            self.config.retrieval_top_k,
+            retrieval_top_k,
         );
 
         let ranked = rank_candidates(
@@ -405,6 +426,7 @@ impl SearchEngine {
             &base_tokens,
             &clean_query,
             &tuned_weights,
+            intent,
         );
 
         let breakdowns = ranked.iter().map(|r| {
@@ -573,7 +595,15 @@ impl SearchEngine {
             })
             .collect();
         let bm25 = store.load_bm25(config.bm25_mmap)?;
-        let mut vector = store.load_vector(config.vector_mmap)?;
+        let mut vector = if config.vector_enabled {
+            store.load_vector(config.vector_mmap)?
+        } else {
+            VectorIndex::empty(
+                config.vector_dims,
+                config.vector_ngram_min,
+                config.vector_ngram_max,
+            )
+        };
         let cache = Mutex::new(QueryCache::new(config.cache_size));
         let deleted = store.load_deleted().unwrap_or_default().into_iter().collect();
 
@@ -640,32 +670,88 @@ impl SearchEngine {
 }
 
 pub struct ShardedEngine {
-    shards: Vec<SearchEngine>,
+    shard_dirs: Vec<std::path::PathBuf>,
+    config: Config,
     results_top_k: usize,
+    shard_cache: Mutex<HashMap<std::path::PathBuf, Arc<SearchEngine>>>,
 }
 
 impl ShardedEngine {
     pub fn load_shards(dir: &str, config: Config) -> std::io::Result<Self> {
-        let mut shards = Vec::new();
-        let mut results_top_k = config.results_top_k;
+        let results_top_k = config.results_top_k;
         let shard_dirs = find_shard_dirs(Path::new(dir))?;
         if shard_dirs.is_empty() {
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no shard directories found"));
         }
-        for shard in shard_dirs {
-            let engine = SearchEngine::load_index(shard.to_string_lossy().as_ref(), config.clone())?;
-            results_top_k = results_top_k.max(engine.config.results_top_k);
-            shards.push(engine);
+        Ok(Self {
+            shard_dirs,
+            config,
+            results_top_k,
+            shard_cache: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn load_or_get_shard(&self, shard: &std::path::PathBuf) -> Option<Arc<SearchEngine>> {
+        if let Ok(cache) = self.shard_cache.lock() {
+            if let Some(engine) = cache.get(shard) {
+                return Some(engine.clone());
+            }
         }
-        Ok(Self { shards, results_top_k })
+
+        let engine = match SearchEngine::load_index(shard.to_string_lossy().as_ref(), self.config.clone()) {
+            Ok(engine) => Arc::new(engine),
+            Err(err) => {
+                eprintln!("[sharded] failed to load shard {}: {err}", shard.display());
+                return None;
+            }
+        };
+
+        if let Ok(mut cache) = self.shard_cache.lock() {
+            cache.insert(shard.clone(), engine.clone());
+        }
+
+        Some(engine)
+    }
+
+    fn query_shard_budget(&self, query: &str) -> usize {
+        let shard_count = self.shard_dirs.len();
+        if shard_count <= 1 {
+            return shard_count;
+        }
+        let intent = detect_intent(query, detect_language(query));
+        let budget = match intent {
+            QueryIntent::Factual => 3,
+            QueryIntent::List => 3,
+            QueryIntent::Comparison => 3,
+            QueryIntent::Other => 2,
+        };
+        budget.min(shard_count).max(1)
     }
 
     pub fn search(&self, query: &str) -> SearchResponse {
+        let mut handles = Vec::new();
+        let shard_count = self.shard_dirs.len();
+        let budget = self.query_shard_budget(query);
+        let seed = normalize_text(query)
+            .bytes()
+            .fold(0usize, |acc, byte| acc.wrapping_mul(31).wrapping_add(byte as usize));
+        let start = if shard_count == 0 { 0 } else { seed % shard_count };
+        for offset in 0..budget {
+            let shard = &self.shard_dirs[(start + offset) % shard_count];
+            if let Some(engine) = self.load_or_get_shard(shard) {
+                let query = query.to_string();
+                handles.push(std::thread::spawn(move || engine.search(&query)));
+            }
+        }
+
         let mut results: Vec<ResultItem> = Vec::new();
         let mut answers: Vec<Answer> = Vec::new();
         let mut best_answer: Option<Answer> = None;
-        for engine in &self.shards {
-            let resp = engine.search(query);
+        for handle in handles {
+            let resp = match handle.join() {
+                Ok(resp) => resp,
+                Err(_) => continue,
+            };
             if let Some(ans) = resp.answer {
                 let better = best_answer
                     .as_ref()
@@ -686,6 +772,16 @@ impl ShardedEngine {
         answers.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
         answers.truncate(3);
 
+        if best_answer.is_none() {
+            if let Some(first) = results.first() {
+                best_answer = Some(Answer {
+                    text: first.text.clone(),
+                    confidence: 0.35,
+                    source: first.id.clone(),
+                });
+            }
+        }
+
         SearchResponse {
             answer: best_answer,
             answers,
@@ -700,14 +796,21 @@ impl ShardedEngine {
         let mut text_store_bytes = 0u64;
         let mut version = 0u32;
         let mut updated_at = 0u64;
-        for shard in &self.shards {
-            let health = shard.index_health();
-            doc_count += health.doc_count;
-            deleted_count += health.deleted_count;
-            vector_bytes += health.vector_bytes;
-            text_store_bytes += health.text_store_bytes;
-            version = version.max(health.index_version);
-            updated_at = updated_at.max(health.index_updated_at);
+        for shard in &self.shard_dirs {
+            let store = IndexStore::new(shard);
+            if let Ok(meta) = store.load_meta() {
+                doc_count += meta.doc_count;
+                deleted_count += meta.deleted_count;
+                version = version.max(meta.version);
+                updated_at = updated_at.max(meta.updated_at);
+                text_store_bytes += meta
+                    .text_store_file
+                    .as_ref()
+                    .and_then(|p| std::fs::metadata(shard.join(p)).ok())
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                vector_bytes += std::fs::metadata(shard.join("vector.bin")).map(|m| m.len() as usize).unwrap_or(0);
+            }
         }
         IndexHealth {
             doc_count,
@@ -855,14 +958,32 @@ fn levenshtein(a: &str, b: &str) -> usize {
 static ENGINE: OnceLock<Mutex<EngineInstance>> = OnceLock::new();
 
 pub fn init_engine(engine: SearchEngine) {
+    if let Some(existing) = ENGINE.get() {
+        if let Ok(mut guard) = existing.lock() {
+            *guard = EngineInstance::Single(engine);
+            return;
+        }
+    }
     let _ = ENGINE.set(Mutex::new(EngineInstance::Single(engine)));
 }
 
 pub fn init_engine_once(engine: SearchEngine) -> bool {
+    if let Some(existing) = ENGINE.get() {
+        if let Ok(mut guard) = existing.lock() {
+            *guard = EngineInstance::Single(engine);
+            return true;
+        }
+    }
     ENGINE.set(Mutex::new(EngineInstance::Single(engine))).is_ok()
 }
 
 pub fn init_engine_instance_once(engine: EngineInstance) -> bool {
+    if let Some(existing) = ENGINE.get() {
+        if let Ok(mut guard) = existing.lock() {
+            *guard = engine;
+            return true;
+        }
+    }
     ENGINE.set(Mutex::new(engine)).is_ok()
 }
 

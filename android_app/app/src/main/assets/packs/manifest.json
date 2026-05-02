@@ -7,7 +7,7 @@
       "profiles": [
         {
           "name": "default",
-          "max_bytes": 1000000000
+          "max_bytes": 2300000000
         },
         {
           "name": "power",
@@ -67,4 +67,3 @@
     }
   ]
 }
-

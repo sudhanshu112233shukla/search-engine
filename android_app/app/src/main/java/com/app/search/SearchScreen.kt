@@ -9,7 +9,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,16 +19,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -41,17 +49,22 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardActions
-import androidx.compose.ui.text.input.KeyboardOptions
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.text.style.LineHeightStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,8 +98,31 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.foundation.Image(
+                painter = painterResource(id = R.drawable.app_logo),
+                contentDescription = "App logo",
+                modifier = Modifier.size(42.dp),
+                contentScale = ContentScale.Crop
+            )
+            Spacer(modifier = Modifier.size(12.dp))
+            Column {
+                Text(
+                    "Offline Search",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Search the downloaded pack entirely on-device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+
         if (!state.packInstalled && state.bundleAvailable) {
             DemoBanner(
                 title = "Full demo pack not installed",
@@ -102,10 +138,19 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
         }
 
         TopAppBar(
-            title = { Text("Offline Search") },
+            title = {
+                Column {
+                    Text("Offline Search")
+                    Text(
+                        "Fast, offline wiki-style search",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray
+                    )
+                }
+            },
             actions = {
                 IconButton(onClick = { viewModel.openSettings() }) {
-                    Text("?")
+                    Text("Settings")
                 }
             }
         )
@@ -142,6 +187,8 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             IndexingBanner("Search engine not ready", 0f)
         } else if (!state.packInstalled && state.bundleAvailable) {
             IndexingBanner("Sample mode active. Download the full pack for complete offline coverage.", 0f)
+        } else {
+            StatusRow(state)
         }
 
         if (state.query.isBlank()) {
@@ -153,21 +200,37 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        AnimatedVisibility(visible = state.answer != null && !state.loading, enter = fadeIn(), exit = fadeOut()) {
-            state.answer?.let { AnswerCard(it, state.answers) }
+        val visibleAnswer = state.answer ?: state.results.firstOrNull()?.let {
+            Answer(
+                text = it.text,
+                confidence = 0.30f,
+                source = it.id
+            )
+        }
+
+        AnimatedVisibility(visible = visibleAnswer != null && !state.loading, enter = fadeIn(), exit = fadeOut()) {
+            visibleAnswer?.let { AnswerCard(it, state.answers) }
         }
 
         if (state.slowQuery) {
             Text("Searching...", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         }
 
-        if (!state.loading && state.results.isEmpty() && state.query.isNotBlank()) {
+        if (!state.loading && state.results.isEmpty() && state.answer == null && state.query.isNotBlank()) {
             EmptyState()
         }
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(state.results) { item ->
-                ResultRow(item, state.query) { viewModel.onResultClick(item) }
+        if (state.results.isNotEmpty()) {
+            Text(
+                "Supporting results",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+            )
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
+                items(state.results) { item ->
+                    ResultRow(item, state.query) { viewModel.onResultClick(item) }
+                }
             }
         }
     }
@@ -181,7 +244,7 @@ fun IndexingBanner(text: String, progress: Float) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(text, style = MaterialTheme.typography.bodySmall)
+            Text(text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             if (progress > 0f) {
                 Spacer(modifier = Modifier.height(6.dp))
                 LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
@@ -201,23 +264,39 @@ fun DemoBanner(title: String, body: String) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(4.dp))
-            Text(body, style = MaterialTheme.typography.bodySmall)
+            Text(body, style = MaterialTheme.typography.bodySmall, color = Color.Black.copy(alpha = 0.78f))
         }
     }
 }
 
 @Composable
 fun AnswerCard(answer: Answer, answers: List<Answer>) {
-    Card(
+    ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(answer.text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Column(modifier = Modifier.padding(18.dp)) {
+            Text(
+                "Best answer",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Confidence: ${"%.2f".format(answer.confidence)}")
-            Text("Source: ${answer.source}")
+            Text(
+                answer.text.ifBlank { "No concise answer extracted." },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                lineHeight = MaterialTheme.typography.titleMedium.lineHeight
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(onClick = {}, label = { Text("Confidence ${"%.2f".format(answer.confidence)}") })
+                AssistChip(onClick = {}, label = { Text("Source") })
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text("Source: ${answer.source}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
 
             if (answers.size > 1) {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -232,21 +311,21 @@ fun AnswerCard(answer: Answer, answers: List<Answer>) {
 
 @Composable
 fun ResultRow(item: ResultItem, query: String, onClick: () -> Unit) {
-    Card(
+    OutlinedCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(16.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             Text(
                 highlightText(item.text, query),
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = 3,
+                maxLines = 4,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(4.dp))
-            Text("Score: ${"%.3f".format(item.score)}", style = MaterialTheme.typography.bodySmall)
+            Text(item.id, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         }
     }
 }
@@ -270,21 +349,35 @@ fun highlightText(text: String, query: String) = buildAnnotatedString {
 fun SuggestionList(history: List<String>, onClick: (String) -> Unit) {
     if (history.isEmpty()) return
     Column {
-        Text("Recent searches", style = MaterialTheme.typography.bodyMedium)
+        Text("Recent searches", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(8.dp))
         history.forEach { q ->
-            Text(q, modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onClick(q) }
-                .padding(vertical = 6.dp))
+            OutlinedCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onClick(q) },
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    q,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
         }
     }
 }
 
 @Composable
 fun EmptyState() {
-    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("No results found", style = MaterialTheme.typography.bodyMedium)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("No results found", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
         Text("Try a different query", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
     }
 }
@@ -302,14 +395,14 @@ fun ShimmerList() {
         label = "alpha"
     )
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         repeat(4) {
-            Card(
+            OutlinedCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(72.dp)
+                    .height(80.dp)
                     .alpha(alpha),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(16.dp)
             ) {}
         }
     }
@@ -319,7 +412,7 @@ fun ShimmerList() {
 fun DetailScreen(item: ResultItem?, onBack: () -> Unit, query: String) {
     if (item == null) return
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Back", modifier = Modifier.clickable { onBack() })
+        Text("Back", modifier = Modifier.clickable { onBack() }, color = MaterialTheme.colorScheme.primary)
         Spacer(modifier = Modifier.height(12.dp))
         Text("Document: ${item.id}", style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(12.dp))
@@ -337,7 +430,7 @@ fun SettingsScreen(
     onDownload: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Back", modifier = Modifier.clickable { onBack() })
+        Text("Back", modifier = Modifier.clickable { onBack() }, color = MaterialTheme.colorScheme.primary)
         Spacer(modifier = Modifier.height(12.dp))
         Text("Settings", style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(12.dp))
@@ -382,6 +475,15 @@ fun SettingsScreen(
         Text("Text store size: ${state.textStoreSizeMb}")
         Text("Last init: ${state.lastInit}")
     }
+}
+
+@Composable
+fun StatusRow(state: SearchUiState) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        AssistChip(onClick = {}, label = { Text(if (state.packInstalled) "Pack ready" else "Sample mode") })
+        AssistChip(onClick = {}, label = { Text(if (state.engineReady) "Engine ready" else "Loading") })
+    }
+    Spacer(modifier = Modifier.height(8.dp))
 }
 
 @Composable
