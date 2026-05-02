@@ -180,6 +180,18 @@ fn main() {
             }
             pipeline::run(PipelineCommand::ImportWiki { dump, out, limit }, pipeline_config);
         }
+        "import-wiki-core" => {
+            let dump = value_after(&args, "--dump").unwrap_or_else(|| "".to_string());
+            let out = value_after(&args, "--out").unwrap_or_else(|| "data/wiki_core.jsonl".to_string());
+            let limit = value_after(&args, "--limit").and_then(|v| v.parse::<usize>().ok());
+            let sentences = value_after(&args, "--sentences").and_then(|v| v.parse::<usize>().ok()).unwrap_or(2);
+            let max_chars = value_after(&args, "--max-chars").and_then(|v| v.parse::<usize>().ok()).unwrap_or(900);
+            if dump.is_empty() {
+                eprintln!("import-wiki-core requires --dump <path>");
+                return;
+            }
+            pipeline::run(PipelineCommand::ImportWikiCore { dump, out, limit, sentences, max_chars }, pipeline_config);
+        }
         "import-osm" => {
             let pbf = value_after(&args, "--pbf").unwrap_or_else(|| "".to_string());
             let out = value_after(&args, "--out").unwrap_or_else(|| "data/osm.jsonl".to_string());
@@ -224,6 +236,7 @@ fn print_usage() {
     eprintln!("  cargo run -- compact --dir data/index_store --out data/index_store_compact");
     eprintln!("  cargo run -- pack --dataset data/index/dataset.json --out data/packs --max-docs 50000 --lang en --download-base https://example.com/packs");
     eprintln!("  cargo run -- import-wiki --dump enwiki-latest-pages-articles-multistream.xml.bz2 --out data/wiki.jsonl --limit 10000");
+    eprintln!("  cargo run -- import-wiki-core --dump enwiki-latest-pages-articles.xml.bz2 --out data/wiki_core.jsonl --limit 10000 --sentences 2 --max-chars 900");
     eprintln!("  cargo run -- import-osm --pbf planet-latest.osm.pbf --out data/osm.jsonl --limit 10000");
     eprintln!("  cargo run -- import-warc --warc CC-MAIN-2024-10.warc.gz --out data/web.jsonl --limit 10000");
     eprintln!("  cargo run -- eval evaluation/queries.json");

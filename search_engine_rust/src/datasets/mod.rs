@@ -8,6 +8,7 @@ use quick_xml::Reader;
 use scraper::{Html, Selector};
 
 use crate::Document;
+use crate::utils::split_sentences;
 
 pub fn import_wikipedia(dump_path: &str, out_path: &str, limit: Option<usize>) -> io::Result<usize> {
     let reader: Box<dyn Read> = if dump_path.ends_with(".bz2") {
@@ -80,6 +81,161 @@ pub fn import_wikipedia(dump_path: &str, out_path: &str, limit: Option<usize>) -
                     _ => {}
                 }
             }
+            Ok(Event::Text(e)) => {
+                if in_title {
+                    if let Ok(t) = e.unescape() {
+                        title.push_str(&t);
+                    }
+                } else if in_id {
+                    if let Ok(t) = e.unescape() {
+                        page_id.push_str(&t);
+                    }
+                } else if in_text {
+                    if let Ok(t) = e.unescape() {
+                        text.push_str(&t);
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(count)
+}
+
+pub fn import_wikipedia_core(
+    dump_path: &str,
+    out_path: &str,
+    limit: Option<usize>,
+    sentences: usize,
+    max_chars: usize,
+) -> io::Result<usize> {
+    let reader: Box<dyn Read> = if dump_path.ends_with(".bz2") {
+        Box::new(BzDecoder::new(File::open(dump_path)?))
+    } else {
+        Box::new(File::open(dump_path)?)
+    };
+
+    let buf_reader = BufReader::new(reader);
+    let mut xml = Reader::from_reader(buf_reader);
+    xml.trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut in_page = false;
+    let mut in_title = false;
+    let mut in_id = false;
+    let mut in_text = false;
+    let mut title = String::new();
+    let mut page_id = String::new();
+    let mut text = String::new();
+    let mut count = 0usize;
+
+    let mut out = OpenOptions::new().create(true).write(true).truncate(true).open(out_path)?;
+
+    fn is_namespace_title(title: &str) -> bool {
+        let t = title.to_lowercase();
+        let prefixes = [
+            "wikipedia:",
+            "category:",
+            "file:",
+            "template:",
+            "help:",
+            "portal:",
+            "draft:",
+            "user:",
+            "talk:",
+            "special:",
+        ];
+        prefixes.iter().any(|p| t.starts_with(p))
+    }
+
+    loop {
+        match xml.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => match e.name().as_ref() {
+                b"page" => {
+                    in_page = true;
+                    title.clear();
+                    page_id.clear();
+                    text.clear();
+                }
+                b"title" => in_title = true,
+                b"id" => {
+                    if in_page && page_id.is_empty() {
+                        in_id = true;
+                    }
+                }
+                b"text" => in_text = true,
+                _ => {}
+            },
+            Ok(Event::End(e)) => match e.name().as_ref() {
+                b"page" => {
+                    in_page = false;
+                    in_title = false;
+                    in_id = false;
+                    in_text = false;
+
+                    if title.is_empty() || page_id.is_empty() || is_namespace_title(&title) {
+                        // Skip non-article namespaces for core pack.
+                        buf.clear();
+                        continue;
+                    }
+
+                    let cleaned = clean_wiki_text(&text);
+                    if cleaned.is_empty() {
+                        buf.clear();
+                        continue;
+                    }
+                    let cleaned_norm = cleaned.trim_start().to_lowercase();
+                    if cleaned_norm.starts_with("#redirect") || cleaned_norm.starts_with("redirect") {
+                        // Skip redirects for the core pack; they're low value and waste space.
+                        buf.clear();
+                        continue;
+                    }
+
+                    let mut lead = String::new();
+                    for s in split_sentences(&cleaned).into_iter().take(sentences.max(1)) {
+                        if s.trim().is_empty() {
+                            continue;
+                        }
+                        if !lead.is_empty() {
+                            lead.push(' ');
+                        }
+                        lead.push_str(s.trim());
+                        if lead.len() >= max_chars {
+                            lead.truncate(max_chars);
+                            break;
+                        }
+                    }
+
+                    let lead = lead
+                        .replace("'''", "")
+                        .replace("''", "")
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !lead.is_empty() {
+                        let doc = Document {
+                            id: format!("wiki:{}", page_id),
+                            text: format!("{}\n{}", title, lead),
+                        };
+                        writeln!(out, "{}", serde_json::to_string(&doc).unwrap_or_else(|_| "{}".to_string()))?;
+                        count += 1;
+                    }
+
+                    if let Some(limit) = limit {
+                        if count >= limit {
+                            break;
+                        }
+                    }
+                }
+                b"title" => in_title = false,
+                b"id" => in_id = false,
+                b"text" => in_text = false,
+                _ => {}
+            },
             Ok(Event::Text(e)) => {
                 if in_title {
                     if let Ok(t) = e.unescape() {

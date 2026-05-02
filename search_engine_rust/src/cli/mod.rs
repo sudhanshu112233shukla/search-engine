@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::bundle::{BundleManifest, BundleProfile, LanguagePack, ShardInfo, dir_size, shard_dir};
 use crate::crawler::{CrawlConfig, Crawler};
-use crate::datasets::{import_osm_pbf, import_warc, import_wikipedia};
+use crate::datasets::{import_osm_pbf, import_warc, import_wikipedia, import_wikipedia_core};
 use crate::processor::{ProcessConfig, Processor};
 use crate::storage::{PipelineConfig, StorageManager};
 use crate::{Config, Document, SearchEngine};
@@ -21,6 +21,7 @@ pub enum Command {
     Compact { dir: String, out: String },
     Pack { dataset: String, out: String, max_docs: usize, lang: String, download_base: Option<String> },
     ImportWiki { dump: String, out: String, limit: Option<usize> },
+    ImportWikiCore { dump: String, out: String, limit: Option<usize>, sentences: usize, max_chars: usize },
     ImportOsm { pbf: String, out: String, limit: Option<usize> },
     ImportWarc { warc: String, out: String, limit: Option<usize> },
 }
@@ -131,6 +132,11 @@ pub fn run(cmd: Command, config: PipelineConfig) {
         Command::ImportWiki { dump, out, limit } => {
             if let Err(err) = import_wikipedia(&dump, &out, limit) {
                 eprintln!("Wiki import failed: {err}");
+            }
+        }
+        Command::ImportWikiCore { dump, out, limit, sentences, max_chars } => {
+            if let Err(err) = import_wikipedia_core(&dump, &out, limit, sentences, max_chars) {
+                eprintln!("Wiki core import failed: {err}");
             }
         }
         Command::ImportOsm { pbf, out, limit } => {

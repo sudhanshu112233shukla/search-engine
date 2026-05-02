@@ -13,6 +13,7 @@ pub use storage::{StorageManager, PipelineConfig, RawPage, ProcessedChunk};
 pub use cli::{Command as PipelineCommand};
 pub use bundle::{BundleManifest, BundleProfile, ShardInfo};
 pub use datasets::{import_osm_pbf, import_warc, import_wikipedia};
+pub use datasets::import_wikipedia_core;
 
 use processing::{process_documents, Chunk};
 use bm25::BM25Index;
