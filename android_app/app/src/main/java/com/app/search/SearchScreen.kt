@@ -35,6 +35,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -85,7 +86,8 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             onClearHistory = { viewModel.clearHistory() },
             onProfile = { viewModel.setProfile(it) },
             onLanguage = { viewModel.setLanguage(it) },
-            onDownload = { viewModel.downloadSelectedPack() }
+            onDownload = { viewModel.downloadSelectedPack() },
+            onDemoModeChange = { viewModel.setDemoMode(it) }
         )
         return
     }
@@ -100,28 +102,53 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            androidx.compose.foundation.Image(
-                painter = painterResource(id = R.drawable.app_logo),
-                contentDescription = "App logo",
-                modifier = Modifier.size(42.dp),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(modifier = Modifier.size(12.dp))
-            Column {
+        if (state.demoMode && state.query.isBlank() && !state.loading && state.results.isEmpty() && state.answer == null) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                androidx.compose.foundation.Image(
+                    painter = painterResource(id = R.drawable.app_logo),
+                    contentDescription = "App logo",
+                    modifier = Modifier.size(88.dp),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(modifier = Modifier.height(10.dp))
                 Text(
                     "Offline Search",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "Search the downloaded pack entirely on-device.",
+                    "Private, fast search on-device.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.Gray
                 )
             }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.foundation.Image(
+                    painter = painterResource(id = R.drawable.app_logo),
+                    contentDescription = "App logo",
+                    modifier = Modifier.size(42.dp),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(modifier = Modifier.size(12.dp))
+                Column {
+                    Text(
+                        "Offline Search",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Search the downloaded pack entirely on-device.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
         }
-        Spacer(modifier = Modifier.height(12.dp))
 
         if (!state.packInstalled && state.bundleAvailable) {
             DemoBanner(
@@ -137,23 +164,33 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        TopAppBar(
-            title = {
-                Column {
-                    Text("Offline Search")
-                    Text(
-                        "Fast, offline wiki-style search",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray
-                    )
+        if (!state.demoMode) {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("Offline Search")
+                        Text(
+                            "Fast, offline wiki-style search",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { viewModel.openSettings() }) {
+                        Text("Settings")
+                    }
                 }
-            },
-            actions = {
-                IconButton(onClick = { viewModel.openSettings() }) {
-                    Text("Settings")
-                }
+            )
+        } else {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Text(
+                    "Settings",
+                    modifier = Modifier.clickable { viewModel.openSettings() }.padding(vertical = 6.dp),
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
-        )
+        }
 
         OutlinedTextField(
             value = state.query,
@@ -220,7 +257,7 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             EmptyState()
         }
 
-        if (state.results.isNotEmpty()) {
+        if (state.results.isNotEmpty() && (!state.demoMode || state.showSupporting)) {
             Text(
                 "Supporting results",
                 style = MaterialTheme.typography.titleSmall,
@@ -232,6 +269,12 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
                     ResultRow(item, state.query) { viewModel.onResultClick(item) }
                 }
             }
+        } else if (state.results.isNotEmpty() && state.demoMode && !state.loading && !state.showSupporting) {
+            Spacer(modifier = Modifier.height(8.dp))
+            AssistChip(
+                onClick = { viewModel.setShowSupporting(true) },
+                label = { Text("Show supporting results") }
+            )
         }
     }
 }
@@ -278,7 +321,7 @@ fun AnswerCard(answer: Answer, answers: List<Answer>) {
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
             Text(
-                "Best answer",
+                "Top answer",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold
@@ -321,7 +364,7 @@ fun ResultRow(item: ResultItem, query: String, onClick: () -> Unit) {
             Text(
                 highlightText(item.text, query),
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = 4,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(4.dp))
@@ -427,7 +470,8 @@ fun SettingsScreen(
     onClearHistory: () -> Unit,
     onProfile: (String) -> Unit,
     onLanguage: (String) -> Unit,
-    onDownload: () -> Unit
+    onDownload: () -> Unit,
+    onDemoModeChange: (Boolean) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Back", modifier = Modifier.clickable { onBack() }, color = MaterialTheme.colorScheme.primary)
@@ -435,6 +479,14 @@ fun SettingsScreen(
         Text("Settings", style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(12.dp))
         Text("Clear search history", modifier = Modifier.clickable { onClearHistory() })
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Demo mode", style = MaterialTheme.typography.titleSmall)
+                Text("Cleaner UI, hides noisy results by default.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            }
+            Switch(checked = state.demoMode, onCheckedChange = { onDemoModeChange(it) })
+        }
         Spacer(modifier = Modifier.height(16.dp))
         Text("Device activation", style = MaterialTheme.typography.titleSmall)
         Text("Device public key (share with pack builder):", style = MaterialTheme.typography.bodySmall, color = Color.Gray)

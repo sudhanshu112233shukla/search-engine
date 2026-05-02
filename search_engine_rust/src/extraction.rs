@@ -107,6 +107,38 @@ fn noise_penalty(sentence: &str) -> f32 {
     -((numbers * 0.04) + (pipes * 0.12) + (brackets * 0.03) + table_like * 0.5)
 }
 
+fn answer_quality_penalty(sentence: &str) -> f32 {
+    let clean = normalize_text(sentence);
+    if clean.is_empty() {
+        return -1.0;
+    }
+    let words = clean.split_whitespace().count();
+    let bracket_count = sentence.matches('[').count() + sentence.matches(']').count();
+    let citation_count = sentence.matches("<ref").count() + sentence.matches("ref>").count();
+    let symbol_count = sentence.chars().filter(|c| !c.is_alphanumeric() && !c.is_whitespace()).count();
+
+    let mut penalty = 0.0f32;
+    if words < 4 {
+        penalty += 0.7;
+    }
+    if words > 45 {
+        penalty += 0.35;
+    }
+    if bracket_count > 4 {
+        penalty += 0.35;
+    }
+    if citation_count > 0 {
+        penalty += 0.25;
+    }
+    if symbol_count > words.saturating_mul(3) {
+        penalty += 0.2;
+    }
+    if clean.starts_with("wikimedia ") || clean.contains(" wikimedia ") {
+        penalty += 0.08;
+    }
+    -penalty
+}
+
 fn title_like_prefix(sentence: &str, subject: &[String]) -> f32 {
     if subject.is_empty() {
         return 0.0;
@@ -179,7 +211,16 @@ where
             } else {
                 0.0
             };
-            let base = 0.34 * r.score + 0.3 * overlap + 0.12 * exact + lead_boost + def_boost + title_boost + factual_bonus + verb_boost + noise_penalty(&sentence);
+            let base = 0.34 * r.score
+                + 0.3 * overlap
+                + 0.12 * exact
+                + lead_boost
+                + def_boost
+                + title_boost
+                + factual_bonus
+                + verb_boost
+                + noise_penalty(&sentence)
+                + answer_quality_penalty(&sentence);
             let score = base * length_shape;
             candidates.push(AnswerCandidate {
                 text: sentence,

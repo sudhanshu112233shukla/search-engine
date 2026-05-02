@@ -42,7 +42,9 @@ data class SearchUiState(
     val downloading: Boolean = false,
     val downloadProgress: Float = 0f,
     val downloadMessage: String = "",
-    val devicePublicKey: String = ""
+    val devicePublicKey: String = "",
+    val demoMode: Boolean = true,
+    val showSupporting: Boolean = false
 )
 
 class SearchViewModel(private val appContext: Context) : ViewModel() {
@@ -56,6 +58,20 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
     private val historyStore = SearchHistoryStore(appContext)
     private val bundlePrefs = BundlePrefs(appContext)
 
+    private fun cleanAnswerText(text: String?): String? {
+        val normalized = text
+            ?.trim()
+            ?.replace(Regex("\\s+"), " ")
+            ?.replace(Regex("\\[[^\\]]*]"), "")
+            ?.replace(Regex("\\(\\s*\\)"), "")
+            ?.trim()
+        val firstSentence = normalized
+            ?.split(Regex("(?<=[.!?])\\s+"))
+            ?.firstOrNull()
+            ?.trim()
+        return (firstSentence ?: normalized)?.takeIf { it.isNotBlank() }?.take(220)
+    }
+
     fun initIfNeeded(datasetPath: String) {
         if (initialized.compareAndSet(false, true)) {
             SecurePackCrypto.ensureDeviceWrapKeyPair()
@@ -63,6 +79,7 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
             val history = historyStore.load()
             val profile = bundlePrefs.getProfile()
             val language = bundlePrefs.getLanguage()
+            val demoMode = bundlePrefs.getDemoMode()
             val bundleManifest = BundleManager.loadManifest(appContext)
             val bundleAvailable = bundleManifest != null
             val langs = bundleManifest?.let { BundleManager.languages(it) } ?: emptyList()
@@ -84,7 +101,8 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                     bundleAvailable = bundleAvailable,
                     packInstalled = packInstalled,
                     availableLanguages = langs,
-                    devicePublicKey = deviceKey
+                    devicePublicKey = deviceKey,
+                    demoMode = demoMode
                 )
             }
 
@@ -144,7 +162,7 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
             if (query == lastQuery) return@launch
             lastQuery = query
 
-            _state.update { it.copy(loading = true) }
+            _state.update { it.copy(loading = true, showSupporting = false) }
             val start = System.currentTimeMillis()
             val response = withContext(Dispatchers.Default) {
                 withTimeoutOrNull(8000L) {
@@ -172,13 +190,8 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
             }
             val history = historyStore.load()
             val bestResult = response.results.firstOrNull()
-            val fallbackText = response.answer?.text
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-                ?: bestResult?.text
-                    ?.trim()
-                    ?.replace(Regex("\\s+"), " ")
-                    ?.take(220)
+            val fallbackText = cleanAnswerText(response.answer?.text)
+                ?: cleanAnswerText(bestResult?.text)
 
             _state.update {
                 val fallbackAnswer = fallbackText?.let {
@@ -199,6 +212,15 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                 )
             }
         }
+    }
+
+    fun setDemoMode(enabled: Boolean) {
+        bundlePrefs.setDemoMode(enabled)
+        _state.update { it.copy(demoMode = enabled, showSupporting = false) }
+    }
+
+    fun setShowSupporting(enabled: Boolean) {
+        _state.update { it.copy(showSupporting = enabled) }
     }
 
     fun onSuggestion(query: String) {

@@ -17,4 +17,10 @@ class BundlePrefs(context: Context) {
     fun setLanguage(language: String) {
         prefs.edit().putString("language", language).apply()
     }
+
+    fun getDemoMode(): Boolean = prefs.getBoolean("demo_mode", true)
+
+    fun setDemoMode(enabled: Boolean) {
+        prefs.edit().putBoolean("demo_mode", enabled).apply()
+    }
 }

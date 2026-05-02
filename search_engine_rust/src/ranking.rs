@@ -230,6 +230,31 @@ fn title_boost(chunk: &Chunk, query_tokens: &[String], intent: QueryIntent) -> f
     boost
 }
 
+fn namespace_penalty(chunk: &Chunk, intent: QueryIntent) -> f32 {
+    if !matches!(intent, QueryIntent::Factual) {
+        return 0.0;
+    }
+    let source = if !chunk.clean.is_empty() { chunk.clean.as_str() } else { chunk.text.as_str() };
+    let title_line = source.lines().next().unwrap_or_default().to_lowercase();
+    let namespaces = [
+        "wikipedia:",
+        "category:",
+        "file:",
+        "template:",
+        "help:",
+        "portal:",
+        "draft:",
+        "user:",
+        "talk:",
+        "special:",
+    ];
+    if namespaces.iter().any(|ns| title_line.starts_with(ns)) {
+        -0.25
+    } else {
+        0.0
+    }
+}
+
 pub fn rank_candidates(
     bm25_results: &[(usize, f32)],
     vector_results: &[(usize, f32)],
@@ -270,6 +295,7 @@ pub fn rank_candidates(
         let proximity = proximity_score(chunk, query_tokens);
         let lead = lead_boost(chunk, query_tokens, intent);
         let title = title_boost(chunk, query_tokens, intent);
+        let namespace = namespace_penalty(chunk, intent);
 
         let bm25_c = weights.bm25 * bm25_norm.get(&doc_id).copied().unwrap_or(0.0);
         let sem_c = weights.semantic * vec_norm.get(&doc_id).copied().unwrap_or(0.0);
@@ -279,7 +305,7 @@ pub fn rank_candidates(
         let lead_c = if matches!(intent, QueryIntent::Factual) { lead } else { lead * 0.5 };
         let title_c = title;
 
-        let score = bm25_c + sem_c + exact_c + phrase_c + prox_c + lead_c + title_c;
+        let score = bm25_c + sem_c + exact_c + phrase_c + prox_c + lead_c + title_c + namespace;
 
         ranked.push(Ranked {
             doc_id,
@@ -289,7 +315,7 @@ pub fn rank_candidates(
                 semantic: sem_c,
                 exact: exact_c,
                 phrase: phrase_c,
-                proximity: prox_c + lead_c + title_c,
+                proximity: prox_c + lead_c + title_c + namespace,
             },
         });
     }
