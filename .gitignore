@@ -13,3 +13,4 @@ android_app/**/local.properties
 android_app/**/.idea/
 android_app/**/*.iml
 search_engine_rust/target/
+search_engine_rust/data/

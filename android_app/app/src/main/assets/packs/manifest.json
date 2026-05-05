@@ -7,11 +7,11 @@
       "profiles": [
         {
           "name": "default",
-          "max_bytes": 379892147
+          "max_bytes": 24128211
         },
         {
           "name": "power",
-          "max_bytes": 379892147
+          "max_bytes": 24128211
         }
       ],
       "shards": [
@@ -20,12 +20,6 @@
           "path": "data/packs_core\\en\\shard_0000",
           "docs": 25000,
           "bytes": 24128211
-        },
-        {
-          "name": "shard_0001",
-          "path": "data/packs_core\\en\\shard_0001",
-          "docs": 20948,
-          "bytes": 355763936
         }
       ]
     }

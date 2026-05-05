@@ -25,14 +25,21 @@ object DownloadManager {
 
         for (shard in shards) {
             val baseTrimmed = base.trimEnd('/')
-            val url = if (baseTrimmed.contains("/releases/download/")) {
-                // GitHub Releases assets are flat filenames (no subfolders).
-                "${baseTrimmed}/${language}_${shard.name}.zip"
-            } else {
-                "${baseTrimmed}/${language}/${shard.name}.zip"
-            }
             onProgress(downloaded.toFloat() / totalBytes, "Downloading ${shard.name}")
-            val ok = downloadAndUnzip(url, File(packRoot, shard.name))
+            val urls = if (baseTrimmed.contains("/releases/download/")) {
+                listOf(
+                    "${baseTrimmed}/${language}_${shard.name}.zip",
+                    "${baseTrimmed}/${shard.name}.zip"
+                )
+            } else {
+                listOf(
+                    "${baseTrimmed}/${language}/${shard.name}.zip",
+                    "${baseTrimmed}/${shard.name}.zip"
+                )
+            }
+            val shardDir = File(packRoot, shard.name)
+            if (shardDir.exists()) shardDir.deleteRecursively()
+            val ok = urls.any { url -> downloadAndUnzip(url, shardDir) }
             if (!ok) return false
             downloaded += shard.bytes
             onProgress(downloaded.toFloat() / totalBytes, "Downloaded ${shard.name}")

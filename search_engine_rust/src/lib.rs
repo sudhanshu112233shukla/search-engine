@@ -609,8 +609,18 @@ impl SearchEngine {
         let deleted = store.load_deleted().unwrap_or_default().into_iter().collect();
 
         let text_store = match meta.text_store_file {
-            Some(ref path) => TextStore::open(Path::new(path), config.text_store_mmap).ok(),
-            None => None,
+            Some(ref path) => {
+                let raw = Path::new(path);
+                let candidate = if raw.is_absolute() {
+                    raw.to_path_buf()
+                } else {
+                    Path::new(dir).join(raw)
+                };
+                TextStore::open(&candidate, config.text_store_mmap)
+                    .or_else(|_| TextStore::open(&Path::new(dir).join("textstore.bin"), config.text_store_mmap))
+                    .ok()
+            }
+            None => TextStore::open(&Path::new(dir).join("textstore.bin"), config.text_store_mmap).ok(),
         };
 
         let term_buckets = build_term_buckets(&bm25);

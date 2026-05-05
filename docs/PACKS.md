@@ -123,3 +123,26 @@ Scripted demo build:
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts/build_demo_pack.ps1
 ```
+
+## Core Pack Build (1GB-first strategy)
+
+Use this when you want a high-quality default pack that feels fast on-device.
+
+It prefers summary-focused wiki data and bounded optional breadth data.
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/build_core_pack.ps1
+```
+
+Outputs:
+
+- `search_engine_rust/data/packs_core/`
+- `search_engine_rust/dist/packs_core/`
+
+Validation commands:
+
+```bash
+cd search_engine_rust
+cargo run --release -- validate-pack --dir data/packs_core/en --smoke-query "what is earth"
+cargo run --release -- search-index --dir data/packs_core/en/shard_0000 --query "what is earth"
+```

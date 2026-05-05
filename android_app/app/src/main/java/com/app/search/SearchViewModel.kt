@@ -43,7 +43,7 @@ data class SearchUiState(
     val downloadProgress: Float = 0f,
     val downloadMessage: String = "",
     val devicePublicKey: String = "",
-    val demoMode: Boolean = true,
+    val demoMode: Boolean = false,
     val showSupporting: Boolean = false
 )
 
@@ -57,6 +57,29 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
     private var lastQuery: String = ""
     private val historyStore = SearchHistoryStore(appContext)
     private val bundlePrefs = BundlePrefs(appContext)
+    private val noisyFallbackPhrases = listOf(
+        "bm25 is a ranking function",
+        "stopwords are common words",
+        "exact match and phrase match"
+    )
+
+    private fun hasUsablePack(language: String, profile: String): Boolean {
+        val root = File(appContext.filesDir, "packs_download/$language/$profile")
+        if (!root.exists()) return false
+        val shardDirs = root.listFiles()?.filter { it.isDirectory && it.name.startsWith("shard_") } ?: emptyList()
+        if (shardDirs.isEmpty()) return false
+        return shardDirs.any { shard ->
+            val names = shard.listFiles()?.map { it.name } ?: emptyList()
+            names.contains("meta.bin") && names.contains("chunks.bin") && names.contains("textstore.bin")
+        }
+    }
+
+    private fun isPackSource(source: String?): Boolean {
+        val s = source?.trim().orEmpty()
+        if (s.isBlank()) return false
+        if (s.matches(Regex("^\\d+$"))) return false
+        return s.contains(":")
+    }
 
     private fun cleanAnswerText(text: String?): String? {
         val normalized = text
@@ -79,11 +102,11 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
             val history = historyStore.load()
             val profile = bundlePrefs.getProfile()
             val language = bundlePrefs.getLanguage()
-            val demoMode = bundlePrefs.getDemoMode()
+            val demoMode = false
             val bundleManifest = BundleManager.loadManifest(appContext)
             val bundleAvailable = bundleManifest != null
             val langs = bundleManifest?.let { BundleManager.languages(it) } ?: emptyList()
-            val packInstalled = File(appContext.filesDir, "packs_download/$language/$profile").exists()
+            val packInstalled = hasUsablePack(language, profile)
             val datasetSize = FileSize.formatMb(datasetPath)
             val textStorePath = datasetPath.replace(Regex("\\.[^.]+"), ".textstore")
             val textStoreSize = FileSize.formatMb(textStorePath)
@@ -120,11 +143,7 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                 val ok = withContext(Dispatchers.IO) {
                     runCatching {
                         val packDir = DatasetLoader.prepareIndexPack(appContext, language, profile)
-                        if (packDir != null) {
-                            NativeSearchEngine.initIndex(packDir)
-                        } else {
-                            NativeSearchEngine.init(datasetPath)
-                        }
+                        if (packDir != null) NativeSearchEngine.initIndex(packDir) else false
                     }.getOrDefault(false)
                 }
                 progressJob?.cancel()
@@ -133,7 +152,7 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                         engineLoading = false,
                         engineReady = ok,
                         indexingProgress = if (ok) 1f else it.indexingProgress,
-                        error = if (!ok) "Failed to initialize search engine" else null
+                        error = if (!ok) "Pack index not ready. Download default pack in Settings and restart app." else null
                     )
                 }
             }
@@ -150,6 +169,10 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
         }
         if (query.trim().length < 2) {
             _state.update { it.copy(loading = false, error = "Type at least 2 characters") }
+            return
+        }
+        if (!_state.value.packInstalled) {
+            _state.update { it.copy(loading = false, error = "No pack installed. Open Settings and download default pack.") }
             return
         }
         if (!_state.value.engineReady) {
@@ -185,29 +208,45 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                 return@launch
             }
 
-            if (response.results.isNotEmpty()) {
+            val filteredResults = response.results.filter { result ->
+                isPackSource(result.id) && noisyFallbackPhrases.none { phrase ->
+                    result.text.lowercase().contains(phrase)
+                }
+            }
+            val filteredAnswers = response.answers.filter { answer ->
+                isPackSource(answer.source) && noisyFallbackPhrases.none { phrase ->
+                    answer.text.lowercase().contains(phrase)
+                }
+            }
+            val primaryAnswer = response.answer?.takeIf { answer ->
+                isPackSource(answer.source) && noisyFallbackPhrases.none { phrase ->
+                    answer.text.lowercase().contains(phrase)
+                }
+            }
+
+            if (filteredResults.isNotEmpty()) {
                 historyStore.add(query)
             }
             val history = historyStore.load()
-            val bestResult = response.results.firstOrNull()
-            val fallbackText = cleanAnswerText(response.answer?.text)
+            val bestResult = filteredResults.firstOrNull()
+            val fallbackText = cleanAnswerText(primaryAnswer?.text)
                 ?: cleanAnswerText(bestResult?.text)
 
             _state.update {
                 val fallbackAnswer = fallbackText?.let {
                     Answer(
                         text = it,
-                        confidence = response.answer?.confidence ?: 0.35f,
-                        source = response.answer?.source ?: bestResult?.id.orEmpty()
+                        confidence = primaryAnswer?.confidence ?: 0.35f,
+                        source = primaryAnswer?.source ?: bestResult?.id.orEmpty()
                     )
                 }
                 it.copy(
                     loading = false,
                     answer = fallbackAnswer,
-                    answers = response.answers,
-                    results = response.results,
+                    answers = filteredAnswers,
+                    results = filteredResults,
                     history = history,
-                    error = if (response.results.isEmpty() && fallbackAnswer == null) "No results found" else null,
+                    error = if (filteredResults.isEmpty() && fallbackAnswer == null) "No relevant result found in installed pack" else null,
                     slowQuery = elapsed > 200
                 )
             }
@@ -215,7 +254,6 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
     }
 
     fun setDemoMode(enabled: Boolean) {
-        bundlePrefs.setDemoMode(enabled)
         _state.update { it.copy(demoMode = enabled, showSupporting = false) }
     }
 
@@ -278,7 +316,8 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
                     downloading = false,
                     downloadProgress = if (ok) 1f else it.downloadProgress,
                     downloadMessage = if (ok) "Download complete. Restart app to use the pack." else "Download failed",
-                    packInstalled = if (ok) true else it.packInstalled
+                    packInstalled = if (ok) hasUsablePack(language, profile) else it.packInstalled,
+                    error = if (ok) null else "Pack download failed"
                 )
             }
         }

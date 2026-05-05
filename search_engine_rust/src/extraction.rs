@@ -94,6 +94,16 @@ fn is_trivial_sentence(sentence: &str) -> bool {
     sentence.split_whitespace().count() < 5
 }
 
+fn factual_sentence_blocklist(sentence: &str, intent: QueryIntent) -> bool {
+    if !matches!(intent, QueryIntent::Factual) {
+        return false;
+    }
+    let clean = normalize_text(sentence);
+    clean.starts_with("list of ")
+        || clean.starts_with("wikipedia:")
+        || clean.contains(" redirect ")
+}
+
 fn noise_penalty(sentence: &str) -> f32 {
     let clean = normalize_text(sentence);
     if clean.is_empty() {
@@ -180,6 +190,9 @@ where
         let sentences = split_sentences(&text);
         for (idx, sentence) in sentences.into_iter().enumerate() {
             if is_trivial_sentence(&sentence) {
+                continue;
+            }
+            if factual_sentence_blocklist(&sentence, intent) {
                 continue;
             }
             let overlap = keyword_overlap(&sentence, &query_tokens);
