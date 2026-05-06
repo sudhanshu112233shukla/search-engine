@@ -3,6 +3,26 @@
 Production-grade, **offline-first** search engine with a Rust core and Android app.  
 It runs fully on-device with hybrid retrieval (BM25 + semantic), multi-signal ranking, and answer extraction.
 
+## Non-Technical Quick Start (Android)
+
+If you just want to try the app, follow this:
+
+1. Open this release page:  
+   `https://github.com/sudhanshu112233shukla/search-engine/releases/tag/SEARCHENGCORE`
+2. Download and install:  
+   `SEARCHENG-debug-v2.1-classic-both-pages.apk`
+3. Open the app -> tap `Settings`
+4. Select language `en` and profile `default`
+5. Tap `Download pack` (internet needed once)
+6. Return to search screen and wait for indexing to finish
+7. Search offline (internet can be turned off)
+
+Try these first queries:
+
+- `what is earth`
+- `what is google`
+- `what is wikipedia`
+
 ## Key Capabilities
 
 - Hybrid retrieval: BM25 keyword + semantic similarity
