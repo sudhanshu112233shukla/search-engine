@@ -1,252 +1,169 @@
 # Offline Hybrid Search Engine
 
-A production-grade, offline-first search engine with a Rust core and an Android app. It delivers fast, private, on-device search using hybrid retrieval (BM25 + semantic), multi-signal ranking, and exact answer extraction. Built for mobile scale and designed to run without servers.
+Production-grade, **offline-first** search engine with a Rust core and Android app.  
+It runs fully on-device with hybrid retrieval (BM25 + semantic), multi-signal ranking, and answer extraction.
 
----
-
-## Why This Exists
-
-Most search systems assume connectivity, servers, and cloud compute. This project proves the opposite: a full search engine that works entirely offline, optimized for mobile devices and large local datasets. It is designed for teams building private knowledge bases, offline apps, and device-first products.
-
----
-
-## Highlights
+## Key Capabilities
 
 - Hybrid retrieval: BM25 keyword + semantic similarity
-- Multi-signal ranking: exact match, phrase match, proximity
-- Exact answer extraction with confidence
-- Query intent tuning (factual, list, comparison)
-- ANN acceleration: IVF + PQ and HNSW for large corpora
-- Persistent on-disk index (fast startup, low memory)
-- Memory-mapped vectors for 100K+ to 1M docs
-- Disk-based BM25 postings (mmap)
-- Incremental updates with WAL replay (crash-safe)
-- Offline dataset packs with language + profile selection
-- Android app with Compose + MVVM
-- Evaluation framework (precision@K, recall@K, MRR)
-
----
+- Multi-signal ranking: exact, phrase, and proximity signals
+- Answer extraction with confidence and source
+- ANN acceleration: IVF/PQ and HNSW for larger corpora
+- Persistent on-disk index with mmap support
+- Crash-safe updates via WAL replay
+- Downloadable offline packs (language + profile)
+- Android app (Compose + MVVM) via JNI/FFI bridge
 
 ## Architecture
 
-```
-User
-  |
-Android App (Compose UI)
-  |
-Rust FFI (JNI)
-  |
-Search Engine Core
-  - BM25
-  - Vector Similarity
-  - ANN (IVF + PQ / HNSW)
-  - Multi-Signal Ranking
-  - Answer Extraction
-  - Snippet Generation
-  |
-Results + Answers
+```text
+Android App (Compose)
+    -> JNI/FFI
+Rust Search Core
+    -> BM25 + Vector Retrieval + ANN + Ranking + Answering
 ```
 
----
+## Repository Structure
 
-## Repository Layout
-
-```
-search-engine/
-+-- android_app/        # Android app (Compose + MVVM)
-+-- search_engine_rust/ # Rust search core + FFI
-+-- evaluation/         # Evaluation datasets
-+-- docs/               # Documentation and assets
-+-- README.md
+```text
+android_app/         Android application
+search_engine_rust/  Rust core engine + FFI + pack tooling
+src/                 Node demo/search utilities
+evaluation/          Evaluation datasets
+docs/                Additional documentation
 ```
 
----
+## Quick Start
 
-
-## Node Demo (CLI + API)
-
-### CLI
-```
-cd search-engine
-npm install
-node demo.js "what is bm25"
-```
-
-### API
-```
-cd search-engine
-npm install
-node src/server.js
-```
-Then open:
-```
-http://localhost:3001/search?q=what%20is%20bm25
-```
----
-
-## Offline Packs (Language + Profile)
-
-Packs allow the Android app to run fully offline with large datasets.
-
-Build packs:
-```bash
-cd search_engine_rust
-cargo run -- pack --dataset data/index/dataset.json --out data/packs --max-docs 50000 --lang en --download-base https://example.com/packs
-```
-
-Pack structure:
-```
-data/packs/
-  manifest.json
-  en/
-    shard_0000/
-    shard_0001/
-```
-
-Android uses:
-- Downloaded packs in `filesDir/packs_download/<lang>/<profile>`
-- Assets fallback if no download exists
-
----
-
-## Public Demo (Ready-to-Use)
-
-The current public demo uses a **core offline pack** hosted on GitHub Releases:
-
-- Release tag: `SEARCHENGCORE`
-- App manifest source: `android_app/app/src/main/assets/packs/manifest.json`
-- Download base already set to:
-  `https://github.com/sudhanshu112233shukla/search-engine/releases/download/SEARCHENGCORE`
-
-### Run Demo App (Android)
+### 1) Run Android Demo Build
 
 ```bash
 cd android_app
 .\gradlew.bat assembleDebug
 ```
 
-Install APK from:
+APK output:
 
 ```text
 android_app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### Download Pack In-App
+### 2) Public Demo Pack (GitHub Releases)
 
-1. Open app -> `Settings`
-2. Language: `en`
-3. Profile: `default` (or `power`; both currently point to the core demo shard)
+Current demo release:
+
+- Tag: `SEARCHENGCORE`
+- Manifest file used by app: `android_app/app/src/main/assets/packs/manifest.json`
+- Download base: `https://github.com/sudhanshu112233shukla/search-engine/releases/download/SEARCHENGCORE`
+
+In app:
+
+1. Open `Settings`
+2. Select language `en`
+3. Select profile `default` (or `power`)
 4. Tap `Download pack`
-5. Return to main screen and wait for index init to finish
+5. Wait for indexing to complete, then search
 
-Then test queries:
+Suggested test queries:
 
 - `what is earth`
 - `what is google`
 - `what is wikipedia`
 
-### Rebuild/Republish Demo Pack
+## Local Validation (Rust)
 
-Validate local pack first:
+Validate pack:
 
 ```bash
 cd search_engine_rust
 cargo run --release -- validate-pack --dir data/packs_core/en --smoke-query "what is earth"
 ```
 
-Export releasable zip assets:
+Single-shard query test:
 
 ```bash
+cargo run --release -- search-index --dir data/packs_core/en/shard_0000 --query "what is google"
+```
+
+Pack info:
+
+```bash
+cargo run --release -- pack-info --dir data/packs_core/en
+```
+
+## Rebuild and Publish Demo Pack
+
+Export release-ready assets:
+
+```bash
+cd search_engine_rust
 cargo run --release -- export-packs --in data/packs_core --out dist/packs_core_release --method deflate --download-base https://github.com/sudhanshu112233shukla/search-engine/releases/download/SEARCHENGCORE
 ```
 
-Upload assets from `search_engine_rust/dist/packs_core_release/` to tag `SEARCHENGCORE`.
+Upload generated files from `search_engine_rust/dist/packs_core_release/` to release tag `SEARCHENGCORE`.
 
-Details: `docs/PACKS.md`.
+More details: `docs/PACKS.md`.
 
-## Ingestion Pipeline
+## Node Demo (CLI/API)
 
-From `search_engine_rust/`:
+CLI:
 
 ```bash
+cd search-engine
+npm install
+node demo.js "what is bm25"
+```
+
+API:
+
+```bash
+cd search-engine
+npm install
+node src/server.js
+```
+
+Open:
+
+```text
+http://localhost:3001/search?q=what%20is%20bm25
+```
+
+## Ingestion Pipeline (Rust)
+
+```bash
+cd search_engine_rust
 cargo run -- crawl --seed https://example.com --limit 1000
 cargo run -- process
 cargo run -- index
 ```
 
-Config file: `search_engine_rust/config.json`
-
-```json
-{
-  "crawl_limit": 10000,
-  "max_depth": 3,
-  "timeout_ms": 5000,
-  "storage_path": "./data",
-  "use_disk_frontier": true,
-  "frontier_path": null
-}
-```
+Config: `search_engine_rust/config.json`
 
 Outputs:
-- Raw pages: `data/raw/pages.jsonl`
-- Processed chunks: `data/processed/chunks.jsonl`
-- Index dataset: `data/index/dataset.json`
 
----
+- `data/raw/pages.jsonl`
+- `data/processed/chunks.jsonl`
+- `data/index/dataset.json`
 
-## Import Real-World Datasets
+## Importers
 
-### Wikipedia (XML dump)
+Wikipedia:
+
 ```bash
 cargo run -- import-wiki --dump enwiki-latest-pages-articles-multistream.xml.bz2 --out data/wiki.jsonl --limit 10000
 ```
 
-### OpenStreetMap (PBF)
+OpenStreetMap:
+
 ```bash
 cargo run -- import-osm --pbf planet-latest.osm.pbf --out data/osm.jsonl --limit 10000
 ```
 
-### Common Crawl (WARC)
+Common Crawl:
+
 ```bash
 cargo run -- import-warc --warc CC-MAIN-2024-10.warc.gz --out data/web.jsonl --limit 10000
 ```
-
----
-
-## Persistent Index
-
-Build on-disk index:
-```bash
-cargo run -- build-index --dataset data/index/dataset.json --out data/index_store
-```
-
-Load index:
-```bash
-cargo run -- load-index --dir data/index_store
-```
-
-Merge updates:
-```bash
-cargo run -- merge-index --dir data/index_store --update data/index/dataset.json
-```
-
-Delete by id:
-```bash
-cargo run -- delete --dir data/index_store doc:<id> doc:<id>
-```
-
-Compact index:
-```bash
-cargo run -- compact --dir data/index_store --out data/index_store_compact
-```
-
----
-
-## Crash-Safe Updates (WAL)
-
-Updates are logged to `wal.jsonl` before applying. On restart, the engine automatically replays and clears the WAL to keep the index consistent.
-
----
 
 ## Evaluation
 
@@ -255,37 +172,17 @@ cd search_engine_rust
 cargo run -- eval ../evaluation/queries.json
 ```
 
-Metrics:
-- Precision@10
-- Recall@10
-- MRR
-- Answer Accuracy
-- Latency (avg + max)
-
----
-
-## Performance Targets
-
-- <200ms search on mobile-sized datasets
-- Low-memory mode for 100K+ docs
-- Memory-mapped vectors for 1M docs
-- ANN acceleration for large vector corpora
-- Fully offline operation
-
----
+Metrics include precision@K, recall@K, MRR, answer accuracy, and latency.
 
 ## Roadmap
 
-- Multi-million document scale beyond 1M
-- Personalization and feedback signals
-- Better multilingual stemming
-- Streaming updates and pack diffing
-
----
+- Better multilingual ranking and stemming
+- More robust pack tiering and diff updates
+- Higher corpus scale with improved on-device latency
 
 ## License
 
-MIT (add a LICENSE file if needed)
+MIT
 
 
 
