@@ -109,46 +109,58 @@ Android uses:
 
 ---
 
-## Demo Pack (Shareable)
+## Public Demo (Ready-to-Use)
 
-For a public demo, do not commit pack files to git (they are large). Instead:
+The current public demo uses a **core offline pack** hosted on GitHub Releases:
 
-1. Use the release pack already prepared for this repo:
+- Release tag: `SEARCHENGCORE`
+- App manifest source: `android_app/app/src/main/assets/packs/manifest.json`
+- Download base already set to:
+  `https://github.com/sudhanshu112233shukla/search-engine/releases/download/SEARCHENGCORE`
 
-```text
-SEARCHENG1
+### Run Demo App (Android)
+
+```bash
+cd android_app
+.\gradlew.bat assembleDebug
 ```
 
-2. Upload these assets to the GitHub Release tag `SEARCHENG1`:
+Install APK from:
 
 ```text
-search_engine_rust/dist/packs_release_deflate/manifest.json
-search_engine_rust/dist/packs_release_deflate/en_shard_0000.zip
-search_engine_rust/dist/packs_release_deflate/en_shard_0001.zip
-search_engine_rust/dist/packs_release_deflate/en_shard_0002.zip
-search_engine_rust/dist/packs_release_deflate/en_shard_0003.zip
-search_engine_rust/dist/packs_release_deflate/en_shard_0004.zip
-search_engine_rust/dist/packs_release_deflate/en_shard_0005.zip
-search_engine_rust/dist/packs_release_deflate/en_shard_0006.zip
-search_engine_rust/dist/packs_release_deflate/en_shard_0007.zip
+android_app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-3. The Android app is already pointed at that release base URL and will fetch the pack from Settings using the `power` profile.
+### Download Pack In-App
 
-4. Validate the pack locally before publishing:
+1. Open app -> `Settings`
+2. Language: `en`
+3. Profile: `default` (or `power`; both currently point to the core demo shard)
+4. Tap `Download pack`
+5. Return to main screen and wait for index init to finish
+
+Then test queries:
+
+- `what is earth`
+- `what is google`
+- `what is wikipedia`
+
+### Rebuild/Republish Demo Pack
+
+Validate local pack first:
 
 ```bash
 cd search_engine_rust
-cargo run --release -- validate-pack --dir data/packs/en --smoke-query "what is google"
+cargo run --release -- validate-pack --dir data/packs_core/en --smoke-query "what is earth"
 ```
 
-If you want to rebuild the release assets from the current corpus:
+Export releasable zip assets:
 
 ```bash
-cargo run --release -- export-packs --in data/packs --out dist/packs_release_deflate --method deflate --download-base https://github.com/sudhanshu112233shukla/search-engine/releases/download/SEARCHENG1
+cargo run --release -- export-packs --in data/packs_core --out dist/packs_core_release --method deflate --download-base https://github.com/sudhanshu112233shukla/search-engine/releases/download/SEARCHENGCORE
 ```
 
-Android can then download the pack in-app (Settings: language/profile). After download, restart the app once so it reloads the installed pack.
+Upload assets from `search_engine_rust/dist/packs_core_release/` to tag `SEARCHENGCORE`.
 
 Details: `docs/PACKS.md`.
 

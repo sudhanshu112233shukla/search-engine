@@ -118,6 +118,14 @@ If a shard zip is too large, reduce `--max-docs` during `pack` or build a smalle
 
 If you need encrypted + signed + device-bound packs (`.spack`), see `docs/SECURE_PACKS.md` (note: device-binding usually requires per-user/per-device pack builds).
 
+Current public demo setup in this repo:
+
+- Android manifest points to `SEARCHENGCORE` release:
+  `android_app/app/src/main/assets/packs/manifest.json`
+- Release base URL:
+  `https://github.com/sudhanshu112233shukla/search-engine/releases/download/SEARCHENGCORE`
+- Demo profile currently uses core shard download for both `default` and `power`.
+
 Scripted demo build:
 
 ```bash
