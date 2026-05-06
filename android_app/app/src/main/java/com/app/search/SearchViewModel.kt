@@ -44,7 +44,9 @@ data class SearchUiState(
     val downloadMessage: String = "",
     val devicePublicKey: String = "",
     val demoMode: Boolean = false,
-    val showSupporting: Boolean = false
+    val showSupporting: Boolean = false,
+    val selfTestPassed: Boolean = false,
+    val selfTestMessage: String = ""
 )
 
 class SearchViewModel(private val appContext: Context) : ViewModel() {
@@ -95,6 +97,32 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
         return (firstSentence ?: normalized)?.takeIf { it.isNotBlank() }?.take(220)
     }
 
+    private fun queryLooksValid(query: String, response: SearchResponse): Boolean {
+        val answerText = response.answer?.text.orEmpty().lowercase()
+        val topText = response.results.firstOrNull()?.text.orEmpty().lowercase()
+        val source = response.answer?.source ?: response.results.firstOrNull()?.id.orEmpty()
+        if (!isPackSource(source)) return false
+        return when (query.lowercase()) {
+            "what is earth" -> answerText.contains("earth") || topText.contains("earth")
+            "what is google" -> answerText.contains("google") || topText.contains("google")
+            "what is web browser" -> answerText.contains("browser") || topText.contains("browser")
+            else -> response.results.isNotEmpty()
+        }
+    }
+
+    private fun runPackSelfTest(): Pair<Boolean, String> {
+        val checks = listOf("what is earth", "what is google", "what is web browser")
+        for (query in checks) {
+            val parsed = runCatching {
+                SearchParser.parse(NativeSearchEngine.search(query))
+            }.getOrNull() ?: return false to "Self-test failed: query error ($query)"
+            if (!queryLooksValid(query, parsed)) {
+                return false to "Self-test failed: weak result ($query)"
+            }
+        }
+        return true to "Self-test passed"
+    }
+
     fun initIfNeeded(datasetPath: String) {
         if (initialized.compareAndSet(false, true)) {
             SecurePackCrypto.ensureDeviceWrapKeyPair()
@@ -140,19 +168,27 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
             }
 
             viewModelScope.launch {
-                val ok = withContext(Dispatchers.IO) {
+                val initOk = withContext(Dispatchers.IO) {
                     runCatching {
                         val packDir = DatasetLoader.prepareIndexPack(appContext, language, profile)
                         if (packDir != null) NativeSearchEngine.initIndex(packDir) else false
                     }.getOrDefault(false)
                 }
+                val selfTest = if (initOk) {
+                    withContext(Dispatchers.Default) { runPackSelfTest() }
+                } else {
+                    false to "Pack index not ready"
+                }
+                val ready = initOk && selfTest.first
                 progressJob?.cancel()
                 _state.update {
                     it.copy(
                         engineLoading = false,
-                        engineReady = ok,
-                        indexingProgress = if (ok) 1f else it.indexingProgress,
-                        error = if (!ok) "Pack index not ready. Download default pack in Settings and restart app." else null
+                        engineReady = ready,
+                        indexingProgress = if (ready) 1f else it.indexingProgress,
+                        selfTestPassed = selfTest.first,
+                        selfTestMessage = selfTest.second,
+                        error = if (!ready) "Pack not usable yet. ${selfTest.second}" else null
                     )
                 }
             }
@@ -175,7 +211,7 @@ class SearchViewModel(private val appContext: Context) : ViewModel() {
             _state.update { it.copy(loading = false, error = "No pack installed. Open Settings and download default pack.") }
             return
         }
-        if (!_state.value.engineReady) {
+        if (!_state.value.engineReady || !_state.value.selfTestPassed) {
             _state.update { it.copy(loading = false, error = "Indexing data... please wait") }
             return
         }

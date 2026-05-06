@@ -39,6 +39,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -102,53 +103,36 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        if (state.demoMode && state.query.isBlank() && !state.loading && state.results.isEmpty() && state.answer == null) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 androidx.compose.foundation.Image(
                     painter = painterResource(id = R.drawable.app_logo),
                     contentDescription = "App logo",
-                    modifier = Modifier.size(88.dp),
-                    contentScale = ContentScale.Crop
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    "Offline Search",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "Private, fast search on-device.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
-            }
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                androidx.compose.foundation.Image(
-                    painter = painterResource(id = R.drawable.app_logo),
-                    contentDescription = "App logo",
-                    modifier = Modifier.size(42.dp),
+                    modifier = Modifier.size(56.dp),
                     contentScale = ContentScale.Crop
                 )
                 Spacer(modifier = Modifier.size(12.dp))
                 Column {
-                    Text(
-                        "Offline Search",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        "Search the downloaded pack entirely on-device.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
-                    )
+                    Text("SEARCHENGINE Z", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                    Text("Offline Search", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("Private, fast, fully on-device search.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AssistChip(onClick = {}, label = { Text("Offline") })
+                        AssistChip(onClick = {}, label = { Text("Private") })
+                        AssistChip(onClick = {}, label = { Text("No signup") })
+                    }
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
         }
+        Spacer(modifier = Modifier.height(12.dp))
 
         if (!state.packInstalled && state.bundleAvailable) {
             DemoBanner(
@@ -164,32 +148,8 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        if (!state.demoMode) {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Offline Search")
-                        Text(
-                            "Fast, offline wiki-style search",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.Gray
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.openSettings() }) {
-                        Text("Settings")
-                    }
-                }
-            )
-        } else {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Text(
-                    "Settings",
-                    modifier = Modifier.clickable { viewModel.openSettings() }.padding(vertical = 6.dp),
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            FilledTonalButton(onClick = { viewModel.openSettings() }) { Text("Settings") }
         }
 
         OutlinedTextField(
@@ -215,6 +175,15 @@ fun SearchScreen(datasetPath: String, viewModel: SearchViewModel = viewModel(fac
             }),
             colors = TextFieldDefaults.outlinedTextFieldColors()
         )
+
+        if (state.query.isBlank()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(onClick = { viewModel.onSuggestion("what is google") }, label = { Text("Try: google") })
+                AssistChip(onClick = { viewModel.onSuggestion("what is earth") }, label = { Text("Try: earth") })
+                AssistChip(onClick = { viewModel.onSuggestion("what is web browser") }, label = { Text("Try: browser") })
+            }
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -474,25 +443,46 @@ fun SettingsScreen(
     onDemoModeChange: (Boolean) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Back", modifier = Modifier.clickable { onBack() }, color = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.height(12.dp))
-        Text("Settings", style = MaterialTheme.typography.titleMedium)
-        Spacer(modifier = Modifier.height(12.dp))
-        Text("Clear search history", modifier = Modifier.clickable { onClearHistory() })
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                androidx.compose.foundation.Image(
+                    painter = painterResource(id = R.drawable.app_logo),
+                    contentDescription = "App logo",
+                    modifier = Modifier.size(52.dp),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(modifier = Modifier.size(10.dp))
+                Column {
+                    Text("SEARCHENGINE Z", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                    Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Manage offline packs and app behavior", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            FilledTonalButton(onClick = { onBack() }) { Text("Back") }
+            FilledTonalButton(onClick = { onClearHistory() }) { Text("Clear history") }
+        }
         Spacer(modifier = Modifier.height(16.dp))
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+            Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("Demo mode", style = MaterialTheme.typography.titleSmall)
                 Text("Cleaner UI, hides noisy results by default.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             }
             Switch(checked = state.demoMode, onCheckedChange = { onDemoModeChange(it) })
+            }
         }
         Spacer(modifier = Modifier.height(16.dp))
-        Text("Device activation", style = MaterialTheme.typography.titleSmall)
-        Text("Device public key (share with pack builder):", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-        Text(state.devicePublicKey, style = MaterialTheme.typography.bodySmall)
-        Spacer(modifier = Modifier.height(16.dp))
-        Text("Offline bundle", style = MaterialTheme.typography.titleSmall)
+        Text("Offline bundle", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         if (state.bundleAvailable) {
             Text("Language: ${state.bundleLanguage}")
             if (state.availableLanguages.isNotEmpty()) {
@@ -522,10 +512,14 @@ fun SettingsScreen(
             Text("No bundle manifest found in assets")
         }
         Spacer(modifier = Modifier.height(16.dp))
-        Text("Index health", style = MaterialTheme.typography.titleSmall)
+        Text("Index health", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text("Dataset size: ${state.datasetSizeMb}")
         Text("Text store size: ${state.textStoreSizeMb}")
         Text("Last init: ${state.lastInit}")
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("Device activation", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text("Device public key (share with pack builder):", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+        Text(state.devicePublicKey, style = MaterialTheme.typography.bodySmall)
     }
 }
 
