@@ -16,7 +16,7 @@ If you just want to try the app, follow this:
 5. Tap `Download pack` (internet needed once)
 6. Return to search screen and wait for indexing to finish
 7. Search offline (internet can be turned off)
-
+8. After download completes restart the app, then search.
 Try these first queries:
 
 - `what is earth`
